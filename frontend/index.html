@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+    <title>AIQuotaGlass</title>
+    <link rel="stylesheet" href="/style.css"/>
+</head>
+<body>
+<div id="app" class="app">
+
+    <!-- Main floating widget -->
+    <div class="widget" id="widget">
+        <div class="titlebar">
+            <div class="title">
+                <span class="logo" aria-hidden="true"></span>
+                <span class="title-text">AIQuotaGlass</span>
+            </div>
+            <div class="actions">
+                <button id="btnRefresh" class="icon-btn" title="立即刷新">⟳</button>
+                <button id="btnSettings" class="icon-btn" title="设置">⚙</button>
+                <button id="btnClose" class="icon-btn danger" title="退出">✕</button>
+            </div>
+        </div>
+
+        <div id="providerList" class="providers">
+            <div class="empty-hint">尚未配置厂商, 点击 ⚙ 开始</div>
+        </div>
+    </div>
+
+    <!-- Settings popup window content (shown when the settings window loads ?settings=1) -->
+    <div id="settingsWin" class="settings-win hidden">
+        <div class="panel-head">
+            <span>设置</span>
+            <button id="btnSettingsClose" class="icon-btn" title="关闭">✕</button>
+        </div>
+        <div class="panel-body" id="settingsBody"></div>
+        <div class="panel-foot">
+            <button id="btnAddProvider" class="ghost-btn">+ 添加账号</button>
+            <button id="btnTestNotify" class="ghost-btn">测试通知</button>
+            <span class="spacer"></span>
+            <button id="btnCancel" class="ghost-btn">取消</button>
+            <button id="btnSave" class="primary-btn">保存</button>
+        </div>
+    </div>
+
+    <!-- Alert toast -->
+    <div id="toast" class="toast hidden"></div>
+
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
