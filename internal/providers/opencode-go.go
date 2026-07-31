@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"aiquotaglass/internal/config"
@@ -73,7 +74,8 @@ func (p *openCodeGo) fetch(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Cookie", "auth="+p.cfg.Cookie)
+	// Tolerate the auth= prefix users copy along from DevTools.
+	req.Header.Set("Cookie", "auth="+strings.TrimPrefix(p.cfg.Cookie, "auth="))
 	req.Header.Set("User-Agent", "AIQuotaGlass/0.1 (+https://github.com/anomalyco/opencode)")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	resp, err := p.client.Do(req)

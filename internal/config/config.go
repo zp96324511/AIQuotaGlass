@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -129,11 +130,18 @@ func Save(cfg *AppConfig) error {
 
 	out := clone(cfg)
 	for i := range out.Providers {
+		// Normalize: strip a leading "auth=" prefix users often copy from the
+		// DevTools Cookie header (the provider re-adds it when sending).
+		out.Providers[i].Cookie = strings.TrimPrefix(out.Providers[i].Cookie, "auth=")
 		enc, err := Encrypt([]byte(out.Providers[i].Cookie))
 		if err != nil {
 			return fmt.Errorf("encrypt cookie for %s: %w", out.Providers[i].ID, err)
 		}
 		out.Providers[i].Cookie = enc
+	}
+	// Keep the in-memory copy consistent (plaintext, no prefix).
+	for i := range cfg.Providers {
+		cfg.Providers[i].Cookie = strings.TrimPrefix(cfg.Providers[i].Cookie, "auth=")
 	}
 
 	data, err := json.MarshalIndent(out, "", "  ")
