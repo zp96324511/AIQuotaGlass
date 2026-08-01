@@ -10,6 +10,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"aiquotaglass/internal/config"
+	"aiquotaglass/internal/notify"
 )
 
 //go:embed all:frontend/dist
@@ -85,6 +86,10 @@ func main() {
 	svc.setup(app, &wailsWindow{app: app, win: win})
 
 	setupTray(app, svc)
+
+	// Bind the main window handle so the native balloon notifier can
+	// register its hidden Shell_NotifyIconW icon (replaces PowerShell toast).
+	notify.BindHWND(uintptr(win.NativeWindow()))
 
 	err = app.Run()
 	if err != nil {

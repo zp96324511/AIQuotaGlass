@@ -1,52 +1,72 @@
+//go:build windows
+
 package notify
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"sync"
+	"unsafe"
+
+	"github.com/wailsapp/wails/v3/pkg/w32"
 )
 
-// windowsNotifier raises a Windows toast via a cached PowerShell script.
-type windowsNotifier struct{}
-
-func newWindowsNotifier() Notifier {
-	if os.PathSeparator == '\\' {
-		return &windowsNotifier{}
-	}
-	return &noopNotifier{}
+// windowsNotifier shows balloon tips via Shell_NotifyIconW using a hidden
+// notification-area icon. No child process (powershell.exe) is spawned,
+// no script file is written — the call is an in-process Win32 syscall,
+// which eliminates the AV heuristic triggered by the old PowerShell bridge.
+type windowsNotifier struct {
+	mu   sync.Mutex
+	hwnd uintptr // owner window (set via bindHWND from AppService.setup)
+	uid  uint32  // notification icon identifier
+	added bool   // whether NIM_ADD has been issued
 }
 
-type noopNotifier struct{}
+func newNotifier() Notifier { return &windowsNotifier{uid: notifyUID} }
 
-func (n *noopNotifier) Show(_ context.Context, _, _ string) error { return nil }
+func (n *windowsNotifier) bindHWND(hwnd uintptr) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.hwnd = hwnd
+}
 
-var script = `$ErrorActionPreference = 'Stop'
-$title = $args[0]
-$message = $args[1]
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-$xml = "<toast><visual><binding template='ToastGeneric'><text>$title</text><text>$message</text></binding></visual></toast>"
-$doc = New-Object Windows.Data.Xml.Dom.XmlDocument
-$doc.LoadXml($xml)
-$toast = [Windows.UI.Notifications.ToastNotification]::new($doc)
-$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("AIQuotaGlass")
-$notifier.Show($toast)
-`
-
-// Show renders a Windows toast using PowerShell's WinRT bridge.
 func (n *windowsNotifier) Show(_ context.Context, title, message string) error {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.hwnd == 0 {
+		return errNoHWND
 	}
-	scriptPath := filepath.Join(dir, "AIQuotaGlass", "toast.ps1")
-	_ = os.MkdirAll(filepath.Dir(scriptPath), 0o755)
-	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
-		return err
+	if !n.added {
+		nid := buildNID(n.hwnd, n.uid, title, message)
+		nid.UFlags = w32.NIF_ICON | w32.NIF_TIP | w32.NIF_INFO
+		nid.HIcon = defaultIcon()
+		nid.DwState = w32.NIS_HIDDEN // hide the persistent tray icon; balloon still shows
+		if !w32.ShellNotifyIcon(w32.NIM_ADD, nid) {
+			return errAddFailed
+		}
+		n.added = true
+		return nil
 	}
-	cmd := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden",
-		"-ExecutionPolicy", "Bypass", "-File", scriptPath, title, message)
-	cmd.SysProcAttr = sysProcAttrHidden
-	return cmd.Run()
+	nid := buildNID(n.hwnd, n.uid, title, message)
+	nid.UFlags = w32.NIF_INFO
+	if !w32.ShellNotifyIcon(w32.NIM_MODIFY, nid) {
+		return errModifyFailed
+	}
+	return nil
 }
+
+// buildNID fills a NOTIFYICONDATA with balloon text. Title → SzInfoTitle,
+// message → SzInfo, icon-flag set to NIIF_WARNING (amber) for threshold alerts.
+func buildNID(hwnd uintptr, uid uint32, title, message string) *w32.NOTIFYICONDATA {
+	nid := &w32.NOTIFYICONDATA{
+		CbSize:       uint32(unsafe.Sizeof(w32.NOTIFYICONDATA{})),
+		HWnd:         w32.HWND(hwnd),
+		UID:          uid,
+		UFlags:       w32.NIF_INFO,
+		DwInfoFlags:  w32.NIIF_WARNING,
+	}
+	copyUTF16(nid.SzInfoTitle[:], title)
+	copyUTF16(nid.SzInfo[:], message)
+	return nid
+}
+
+// copyUTF16 is defined in copyutf16.go (platform-independent for testability).

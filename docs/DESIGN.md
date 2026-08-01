@@ -45,7 +45,7 @@
 | 桌面框架 | Wails v3 (alpha2.119, 锁定) | 后端 Go + 前端 WebView2;`Frameless`+`AlwaysOnTop`+`BackgroundTypeTransparent` 一等支持;体积小 |
 | 前端 | 原生 TS + Vite + @wailsio/runtime | 无框架依赖,轻量;`--wails-draggable: drag` 走 Wails 自带拖拽运行时 |
 | 渲染 | WebView2(系统自带) | 透明窗口 + backdrop-filter 玻璃效果 |
-| 通知 | PowerShell WinRT toast | Wails v3 alpha 无内置通知 API |
+| 通知 | 原生 Shell_NotifyIconW 气球 | Wails v3 alpha 无内置通知 API;直接通过 `w32.ShellNotifyIcon` syscall,不启动 PowerShell 子进程 |
 | 持久化 | JSON + Windows DPAPI | cookie 加密存储,防明文泄露 |
 
 备选被否:Electron(体积/内存过大)、PySide6(需带 Python 运行时)、JavaFX(JVM 过重)、Fyne(不支持真透明窗口)。
@@ -116,7 +116,9 @@ OS 专属代码全部 platform-tagged,业务层通过接口解耦:
 - tick 回调 = `refresh(ctx)`:遍历启用厂商并行(当前串行,未来可并行化),组装 `[]Result` emit
 
 ### 4.5 internal/notify
-- `Notifier.Show(ctx, title, message)`;Windows 实现缓存 toast.ps1 到配置目录,`powershell -NoProfile -WindowStyle Hidden` 隐藏执行(CREATE_NO_WINDOW)
+- `Notifier.Show(ctx, title, message)`;Windows 实现通过 `w32.ShellNotifyIcon` (NIM_ADD/NIM_MODIFY) 发送气球通知,使用隐藏通知区图标(`NIS_HIDDEN`),不启动 PowerShell 子进程,不写 .ps1 脚本
+- HWND 由 `notify.BindHWND(hwnd)` 在 `main.go` 窗口创建后注入;首次 `Show` 执行 `NIM_ADD`,后续 `Show` 执行 `NIM_MODIFY`
+- 非降级为 noop(`notify_other.go`)
 - 告警频率:边缘触发(percent 从 <阈值 到 ≥阈值 才发一次,回落再触发)
 
 ### 4.6 internal/edge

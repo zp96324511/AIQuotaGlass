@@ -36,7 +36,7 @@ app.go                      AppService —— 前端绑定的唯一服务(setup 
 internal/config/            配置:JSON 持久化,DPAPI 加密 cookie,AQUOTA_CONFIG_DIR
 internal/providers/         Provider 接口 + opencode-go(SSR HTML 正则解析) + zhipu/kimi/minimax(API Key 查询)
 internal/scheduler/         定时刷新(防重入,可停/重启/立即执行)
-internal/notify/            Windows toast(PowerShell WinRT 桥,CREATE_NO_WINDOW)
+internal/notify/            Windows 通知(Shell_NotifyIconW 气球,无 PowerShell 子进程)
 internal/edge/              贴边吸附(按窗口所在显示器 workarea + SetWindowPos, 10px 阈值)
 snap_*.go / window_adapter.go  OS 专属胶水(platform-tagged)
 frontend/                   玻璃拟态 UI;src/main.ts 双窗口模式,public/style.css
@@ -63,7 +63,7 @@ frontend/                   玻璃拟态 UI;src/main.ts 双窗口模式,public/s
 1. **默认数据目录不可写时的应对**:`config.json` 与 WebView2 数据默认写 `os.UserConfigDir()`(Windows 为 `%AppData%\AIQuotaGlass`);该分区空间不足时应用启动会失败——用 `AQUOTA_CONFIG_DIR` 环境变量把运行数据目录迁移到其他分区。
 2. **OpenCode 用量无独立 JSON API**——数据 SSR 内嵌在页面 HTML(`rollingUsage:`/`usage.list`),用正则解析。字段含 `$R[NN]=` 混淆,详见 `internal/providers/opencode.go` 的 `reWindows`/`reRecord`。
 3. 验证 opencode 接口用 `curl.exe`,**不要用** `Invoke-WebRequest`(会 302 跳 OpenAuth 登录页)。
-4. Wails v3 alpha **没有内置通知 API**——toast 走 PowerShell WinRT(`internal/notify/notify_windows.go`),每次告警起一个隐藏 powershell 进程。
+4. Wails v3 alpha **没有内置通知 API**——通知走原生 `Shell_NotifyIconW` 气球(`internal/notify/notify_windows.go`),通过 `wails/v3/pkg/w32` 包直接 syscall,不启动 PowerShell 子进程,不写 .ps1 脚本文件。HWND 由 `notify.BindHWND(hwnd)` 在 `main.go` 窗口创建后注入。非 Windows 平台降级为 noop(`notify_other.go`)。
 5. 透明窗口:`BackgroundTypeTransparent` 创建时生效;运行时透明度**必须走前端 CSS**(`document.body.style.opacity`)。原生 SetLayeredWindowAttributes(WS_EX_LAYERED)与 DirectComposition 冲突会破坏渲染——不要再走原生路径。
 6. 贴边=缩条:每 800ms 轮询 `edge.SnapToEdge`(拖拽中左键按下时跳过,见 `snap_windows.go` 的 `mouseLeftDown`)+ 前端 `mouseup` 调 `SnapIfNearEdge()`。贴边后窗口自动缩成进度条(竖条 44x200 贴左右、横条 200x44 贴上下,见 `app.go` 的 `setSnapState`),显示 `snapProviderID`(设置面板「贴边展示账号」,空=第一个启用账号)的 5h/周/月 三条进度;点条 `ExpandWidget()` 恢复 340x300 并偏移 40px 离开吸附区。前端 `widget:snap` 事件({dir,providerID})切换形态。`SnapToEdge` 返回方向字符串,**窗口已贴边时也返回方向**(勿改回空串,否则缩条不触发)。拖拽用 `--wails-draggable: drag`。
 7. WebView2 远程调试(仅调试):`Windows.AdditionalBrowserArgs: ["--remote-debugging-port=9223"]`,然后 CDP `Runtime.evaluate` 读 DOM。发布版必须移除。
