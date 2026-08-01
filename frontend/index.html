@@ -4,6 +4,7 @@
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
     <title>AIQuotaGlass</title>
+    <link rel="icon" type="image/svg+xml" href="/aiquotaglass-logo.svg"/>
     <link rel="stylesheet" href="/style.css"/>
 </head>
 <body>
@@ -13,7 +14,7 @@
     <div class="widget" id="widget">
         <div class="titlebar">
             <div class="title">
-                <span class="logo" aria-hidden="true"></span>
+                <img class="brand-logo" src="/aiquotaglass-logo.svg" alt="" aria-hidden="true"/>
                 <span class="title-text">AIQuotaGlass</span>
             </div>
             <div class="actions">
@@ -38,7 +39,10 @@
     <!-- Settings popup window content (shown when the settings window loads ?settings=1) -->
     <div id="settingsWin" class="settings-win hidden">
         <div class="panel-head">
-            <span>设置</span>
+            <div class="panel-brand">
+                <img class="brand-logo" src="/aiquotaglass-logo.svg" alt="" aria-hidden="true"/>
+                <span>设置</span>
+            </div>
             <button id="btnSettingsClose" class="icon-btn" title="关闭">✕</button>
         </div>
         <div class="panel-body" id="settingsBody"></div>

@@ -8,13 +8,18 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
-	"github.com/wailsapp/wails/v3/pkg/icons"
 
 	"aiquotaglass/internal/config"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed build/trayicon-light.png
+var trayIconLight []byte
+
+//go:embed build/trayicon-dark.png
+var trayIconDark []byte
 
 func main() {
 	// The system drive may be full; allow relocating runtime data via env.
@@ -53,12 +58,12 @@ func main() {
 	})
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:              "AIQuotaGlass",
-		Width:              widgetWidth,
-		Height:             widgetHeight,
-		Frameless:          true,
-		AlwaysOnTop:        cfg.AlwaysOnTop,
-		DisableResize:      true,
+		Title:               "AIQuotaGlass",
+		Width:               widgetWidth,
+		Height:              widgetHeight,
+		Frameless:           true,
+		AlwaysOnTop:         cfg.AlwaysOnTop,
+		DisableResize:       true,
 		MinimiseButtonState: application.ButtonHidden,
 		MaximiseButtonState: application.ButtonHidden,
 		CloseButtonState:    application.ButtonHidden,
@@ -101,8 +106,8 @@ func setupTray(app *application.App, svc *AppService) {
 	quitItem.OnClick(func(*application.Context) { svc.Quit() })
 
 	tray := app.SystemTray.New()
-	tray.SetIcon(icons.SystrayLight)
-	tray.SetDarkModeIcon(icons.SystrayDark)
+	tray.SetIcon(trayIconLight)
+	tray.SetDarkModeIcon(trayIconDark)
 	tray.SetTooltip("AIQuotaGlass")
 	tray.SetMenu(menu)
 	tray.OnClick(svc.ShowMainWindow)

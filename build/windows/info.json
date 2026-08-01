@@ -5,11 +5,11 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "0.1.0",
-			"CompanyName": "My Company",
-			"FileDescription": "A AIQuotaGlass application",
-			"LegalCopyright": "© 2026, My Company",
-			"ProductName": "My Product",
-			"Comments": "This is a comment"
+			"CompanyName": "AIQuotaGlass",
+			"FileDescription": "Multi-provider AI usage quota monitor with threshold alerts",
+			"LegalCopyright": "© 2026, zp96324511",
+			"ProductName": "AIQuotaGlass",
+			"Comments": "Floating glass window that monitors AI plan/API usage"
 		}
 	}
 }

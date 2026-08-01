@@ -2,6 +2,10 @@
 
 多厂商 AI 套餐 / API 用量定时刷新与阈值告警的 Windows 桌面悬浮工具。
 
+<p align="center">
+  <img src="frontend/public/aiquotaglass-logo.svg" width="96" height="96" alt="AIQuotaGlass logo" />
+</p>
+
 透明玻璃拟态、无边框、置顶、贴边吸附，不遮挡桌面工作区。
 
 ## 效果预览

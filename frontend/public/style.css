@@ -58,10 +58,12 @@ html, body {
     flex-shrink: 0;
 }
 .title { display: flex; align-items: center; gap: 7px; }
-.logo {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    box-shadow: 0 0 8px rgba(76, 214, 164, 0.6);
+.brand-logo {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(76, 214, 164, 0.28);
 }
 .title-text { font-weight: 600; letter-spacing: 0.3px; font-size: 12.5px; }
 .actions { display: flex; gap: 2px; --wails-draggable: no-drag; }
@@ -259,6 +261,8 @@ body[data-snap] .widget .providers { display: none; }
     --wails-draggable: drag;
     flex-shrink: 0;
 }
+.panel-brand { display: flex; align-items: center; gap: 8px; }
+.panel-brand .brand-logo { width: 20px; height: 20px; border-radius: 6px; }
 .panel-head .icon-btn { --wails-draggable: no-drag; }
 
 .panel-body {
