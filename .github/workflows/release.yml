@@ -1,0 +1,156 @@
+name: Release
+
+# Triggered by version tags (v*). Builds, signs (Authenticode), packages,
+# and publishes a GitHub Release. The signing step is fail-closed: if
+# SIGN_CERT_B64 or SIGN_CERT_PASSWORD secrets are missing, the job fails
+# and no release is published.
+#
+# PR / main builds are handled by ci.yml (unsigned, never signs, never releases).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.25'
+  WAILS_VERSION: 'v3.0.0-alpha2.119'
+  TIMESTAMP_SERVER: 'http://timestamp.digicert.com'
+
+jobs:
+  release:
+    name: Build, Sign & Release
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails3 CLI
+        shell: pwsh
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+
+      # ── Fail-closed: refuse to proceed without signing secrets ──
+      - name: Assert signing secrets present
+        shell: bash
+        env:
+          CERT_B64: ${{ secrets.SIGN_CERT_B64 }}
+          CERT_PW: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          [ -n "$CERT_B64" ] || { echo "::error::SIGN_CERT_B64 secret is required for releases"; exit 1; }
+          [ -n "$CERT_PW" ]  || { echo "::error::SIGN_CERT_PASSWORD secret is required for releases"; exit 1; }
+
+      # ── Inject version from tag (v0.2.0 → 0.2.0) ──
+      - name: Set version from tag
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          Write-Host "Version: $ver"
+          # Update info.json
+          $info = Get-Content -Raw 'build/windows/info.json' | ConvertFrom-Json
+          $info.fixed.file_version = $ver
+          $info.info.'0000'.ProductVersion = $ver
+          $info | ConvertTo-Json -Depth 5 | Set-Content -NoNewline 'build/windows/info.json'
+          # Update config.yml version
+          $cfg = Get-Content -Raw 'build/config.yml'
+          $cfg = $cfg -replace 'version:\s*"[^"]*"', "version: `"$ver`""
+          Set-Content -NoNewline 'build/config.yml' $cfg
+          Write-Host "Injected version $ver"
+
+      # ── Build ──
+      - name: Build application
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:USERPROFILE\go\bin;$env:PATH"
+          wails3 build
+
+      # ── Decode signing certificate ──
+      - name: Decode signing certificate
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.SIGN_CERT_B64 }}
+        run: |
+          $bytes = [Convert]::FromBase64String($env:CERT_B64)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", $bytes)
+          if ((Get-Item "$env:RUNNER_TEMP\codesign.pfx").Length -eq 0) {
+            throw "Decoded certificate is empty"
+          }
+          Write-Host "Certificate decoded"
+
+      # ── Locate signtool.exe ──
+      - name: Locate signtool
+        id: signtool
+        shell: pwsh
+        run: |
+          $st = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\signtool.exe' -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $st) { throw "signtool.exe not found" }
+          "path=$($st.FullName)" | Add-Content $env:GITHUB_OUTPUT
+          Write-Host "signtool: $($st.FullName)"
+
+      # ── Sign with RFC3161 timestamp ──
+      - name: Sign executable
+        shell: pwsh
+        env:
+          CERT_PW: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          & '${{ steps.signtool.outputs.path }}' sign /f "$env:RUNNER_TEMP\codesign.pfx" /p "$env:CERT_PW" `
+            /tr ${{ env.TIMESTAMP_SERVER }} /td sha256 /fd sha256 `
+            "bin\aiquotaglass.exe"
+          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit $LASTEXITCODE" }
+
+      # ── Verify signature ──
+      - name: Verify signature
+        shell: pwsh
+        run: |
+          & '${{ steps.signtool.outputs.path }}' verify /pa /all "bin\aiquotaglass.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Signature verification failed" }
+          Write-Host "Signature verified"
+
+      # ── Scrub certificate ──
+      - name: Scrub certificate file
+        if: always()
+        shell: pwsh
+        run: |
+          $pfx = "$env:RUNNER_TEMP\codesign.pfx"
+          if (Test-Path $pfx) { Remove-Item $pfx -Force; Write-Host "Certificate removed" }
+
+      # ── Stage and checksum ──
+      - name: Stage release archive
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $pkgName = "AIQuotaGlass-$tag-windows-amd64"
+          $stage = "stage\$pkgName"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item "bin\aiquotaglass.exe" "$stage\AIQuotaGlass.exe"
+          Copy-Item "README.md" "$stage\README.md"
+          Copy-Item "LICENSE" "$stage\LICENSE"
+          Compress-Archive -Path "$stage\*" -DestinationPath "stage\$pkgName.zip" -CompressionLevel Optimal -Force
+          # SHA-256 of the signed archive
+          $hash = (Get-FileHash "stage\$pkgName.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $pkgName.zip" | Set-Content -NoNewline "stage\$pkgName.sha256"
+          Get-Content "stage\$pkgName.sha256"
+          Get-ChildItem stage | Select-Object Name
+
+      # ── Publish GitHub Release ──
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: stage/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

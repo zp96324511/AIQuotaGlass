@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25'
+  WAILS_VERSION: 'v3.0.0-alpha2.119'
+
+jobs:
+  lint-test:
+    name: Lint & Test (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go test
+        run: go test -race -count=1 ./...
+
+      - name: Cross-compile check (GOOS=windows)
+        run: GOOS=windows GOARCH=amd64 go build -o /dev/null .
+
+  build-windows:
+    name: Build (windows)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails3 CLI
+        shell: pwsh
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+
+      - name: Build application (unsigned)
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:USERPROFILE\go\bin;$env:PATH"
+          wails3 build
+
+      - name: Verify exe exists
+        shell: pwsh
+        run: Test-Path "bin\aiquotaglass.exe"
+
+      - name: Generate SHA-256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash "bin\aiquotaglass.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  aiquotaglass.exe" | Set-Content "bin\aiquotaglass.exe.sha256"
+          Get-Content "bin\aiquotaglass.exe.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aiquotaglass-unsigned
+          path: |
+            bin/aiquotaglass.exe
+            bin/aiquotaglass.exe.sha256
+          if-no-files-found: error
+          retention-days: 14
