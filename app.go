@@ -23,6 +23,9 @@ type windowControl interface {
 	SetPosition(x, y int)
 	Position() (x, y int)
 	Quit()
+	Show()
+	Hide()
+	Focus()
 	NativeHandle() uintptr
 }
 
@@ -239,6 +242,24 @@ func (s *AppService) SnapIfNearEdge() {
 	if s.win != nil && s.win.NativeHandle() != 0 {
 		snap(s.win.NativeHandle(), true)
 	}
+}
+
+// ShowMainWindow restores and focuses the widget window (tray click / menu).
+func (s *AppService) ShowMainWindow() {
+	if s.win == nil {
+		return
+	}
+	s.win.Show()
+	s.win.Focus()
+}
+
+// HideToTray hides the widget window instead of quitting; it stays alive in
+// the system tray and keeps refreshing in the background.
+func (s *AppService) HideToTray() {
+	if s.win == nil {
+		return
+	}
+	s.win.Hide()
 }
 
 // Quit shuts the application down.

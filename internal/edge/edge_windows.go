@@ -12,13 +12,24 @@ import (
 const snapThreshold = 10 // pixels from screen edge that triggers snapping
 
 const (
-	spiGetWorkArea = 0x0030
+	spiGetWorkArea       = 0x0030
+	monitorDefaultToNear = 0x00000002
 )
 
 var (
 	user32               = syscall.NewLazyDLL("user32.dll")
 	procSystemParameters = user32.NewProc("SystemParametersInfoW")
+	procMonitorFrom      = user32.NewProc("MonitorFromWindow")
+	procGetMonitorInfo   = user32.NewProc("GetMonitorInfoW")
 )
+
+// monitorInfo matches the Windows MONITORINFO struct.
+type monitorInfo struct {
+	cbSize    uint32
+	rcMonitor w32.RECT
+	rcWork    w32.RECT
+	dwFlags   uint32
+}
 
 // WorkArea returns the usable desktop rectangle (excludes taskbar).
 func WorkArea() (left, top, right, bottom int) {
@@ -30,8 +41,24 @@ func WorkArea() (left, top, right, bottom int) {
 	return int(rc.Left), int(rc.Top), int(rc.Right), int(rc.Bottom)
 }
 
-// SnapToEdge snaps a window flush to the nearest screen edge when it is close
-// enough. Returns true when the window was moved.
+// workAreaForWindow returns the work area of the monitor the window is on,
+// falling back to the primary monitor work area when the lookup fails.
+func workAreaForWindow(hwnd uintptr) (left, top, right, bottom int) {
+	hm, _, _ := procMonitorFrom.Call(hwnd, monitorDefaultToNear)
+	if hm == 0 {
+		return WorkArea()
+	}
+	var mi monitorInfo
+	mi.cbSize = uint32(unsafe.Sizeof(mi))
+	r, _, _ := procGetMonitorInfo.Call(hm, uintptr(unsafe.Pointer(&mi)))
+	if r == 0 {
+		return WorkArea()
+	}
+	return int(mi.rcWork.Left), int(mi.rcWork.Top), int(mi.rcWork.Right), int(mi.rcWork.Bottom)
+}
+
+// SnapToEdge snaps a window flush to the nearest edge of its own monitor
+// when it is close enough. Returns true when the window was moved.
 func SnapToEdge(hwnd uintptr, snap bool) bool {
 	if !snap {
 		return false
@@ -45,7 +72,7 @@ func SnapToEdge(hwnd uintptr, snap bool) bool {
 	hh := int(rect.Bottom - rect.Top)
 	curX, curY := int(rect.Left), int(rect.Top)
 
-	left, top, right, bottom := WorkArea()
+	left, top, right, bottom := workAreaForWindow(hwnd)
 
 	best := -1
 	var targetX, targetY int

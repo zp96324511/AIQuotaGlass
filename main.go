@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
+	"github.com/wailsapp/wails/v3/pkg/icons"
 
 	"aiquotaglass/internal/config"
 )
@@ -42,7 +44,8 @@ func main() {
 			Handler: application.AssetFileServerFS(assets),
 		},
 		Windows: application.WindowsOptions{
-			WebviewUserDataPath: webviewDir,
+			WebviewUserDataPath:           webviewDir,
+			DisableQuitOnLastWindowClosed: true,
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
@@ -60,14 +63,45 @@ func main() {
 		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 		Windows: application.WindowsWindow{
 			DisableFramelessWindowDecorations: false,
+			HiddenOnTaskbar:                   true,
 		},
 		URL: "/",
 	})
 
+	// Closing the widget hides it to the system tray instead of quitting.
+	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		win.Hide()
+		e.Cancel()
+	})
+
 	svc.setup(app, &wailsWindow{app: app, win: win})
+
+	setupTray(app, svc)
 
 	err = app.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// setupTray creates the system tray icon that keeps the app reachable while
+// the widget is hidden: left click restores the window, the menu offers show,
+// refresh and quit.
+func setupTray(app *application.App, svc *AppService) {
+	menu := application.NewMenu()
+	showItem := menu.Add("显示窗口")
+	showItem.OnClick(func(*application.Context) { svc.ShowMainWindow() })
+	refreshItem := menu.Add("刷新数据")
+	refreshItem.OnClick(func(*application.Context) { svc.RefreshAll() })
+	menu.AddSeparator()
+	quitItem := menu.Add("退出")
+	quitItem.OnClick(func(*application.Context) { svc.Quit() })
+
+	tray := app.SystemTray.New()
+	tray.SetIcon(icons.SystrayLight)
+	tray.SetDarkModeIcon(icons.SystrayDark)
+	tray.SetTooltip("AIQuotaGlass")
+	tray.SetMenu(menu)
+	tray.OnClick(svc.ShowMainWindow)
+	tray.Run()
 }

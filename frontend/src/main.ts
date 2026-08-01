@@ -442,7 +442,7 @@ function initWidget() {
         AppService.RefreshAll().then(res => { results = res; render(); }).catch(e => toast("刷新失败: " + e));
     });
     $<HTMLButtonElement>("btnSettings").addEventListener("click", () => AppService.OpenSettings());
-    $<HTMLButtonElement>("btnClose").addEventListener("click", () => AppService.Quit());
+    $<HTMLButtonElement>("btnClose").addEventListener("click", () => AppService.HideToTray());
 
     // Drag release -> edge snap
     document.addEventListener("mouseup", () => AppService.SnapIfNearEdge());

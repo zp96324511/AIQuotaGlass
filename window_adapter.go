@@ -19,6 +19,12 @@ func (w *wailsWindow) Position() (int, int) { return w.win.Position() }
 
 func (w *wailsWindow) Quit() { w.app.Quit() }
 
+func (w *wailsWindow) Show() { w.win.Show() }
+
+func (w *wailsWindow) Hide() { w.win.Hide() }
+
+func (w *wailsWindow) Focus() { w.win.Focus() }
+
 func (w *wailsWindow) NativeHandle() uintptr {
 	return uintptr(w.win.NativeWindow())
 }
