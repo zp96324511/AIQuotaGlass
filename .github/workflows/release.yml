@@ -1,9 +1,16 @@
 name: Release
 
-# Triggered by version tags (v*). Builds, signs (Authenticode), packages,
-# and publishes a GitHub Release. The signing step is fail-closed: if
-# SIGN_CERT_B64 or SIGN_CERT_PASSWORD secrets are missing, the job fails
-# and no release is published.
+# Triggered by version tags (v*). Builds, submits to SignPath for Authenticode
+# signing (free for OSS), packages, and publishes a GitHub Release.
+# The signing step is fail-closed: if SIGNPATH_* secrets are missing, the job
+# fails and no release is published.
+#
+# Prerequisites (see docs/SIGNPATH_SETUP.md):
+#   1. Apply at https://signpath.org/apply (free for open-source)
+#   2. Install the SignPath GitHub App on this repository
+#   3. Configure a SignPath project with Authenticode artifact config
+#   4. Add secrets: SIGNPATH_API_TOKEN, SIGNPATH_ORGANIZATION_ID,
+#      SIGNPATH_PROJECT_SLUG
 #
 # PR / main builds are handled by ci.yml (unsigned, never signs, never releases).
 
@@ -14,11 +21,11 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 env:
   GO_VERSION: '1.25'
   WAILS_VERSION: 'v3.0.0-alpha2.119'
-  TIMESTAMP_SERVER: 'http://timestamp.digicert.com'
 
 jobs:
   release:
@@ -42,15 +49,17 @@ jobs:
         shell: pwsh
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
 
-      # ── Fail-closed: refuse to proceed without signing secrets ──
-      - name: Assert signing secrets present
+      # ── Fail-closed: refuse to proceed without SignPath secrets ──
+      - name: Assert SignPath secrets present
         shell: bash
         env:
-          CERT_B64: ${{ secrets.SIGN_CERT_B64 }}
-          CERT_PW: ${{ secrets.SIGN_CERT_PASSWORD }}
+          API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          ORG_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          PROJECT: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
         run: |
-          [ -n "$CERT_B64" ] || { echo "::error::SIGN_CERT_B64 secret is required for releases"; exit 1; }
-          [ -n "$CERT_PW" ]  || { echo "::error::SIGN_CERT_PASSWORD secret is required for releases"; exit 1; }
+          [ -n "$API_TOKEN" ] || { echo "::error::SIGNPATH_API_TOKEN secret is required for releases"; exit 1; }
+          [ -n "$ORG_ID" ]    || { echo "::error::SIGNPATH_ORGANIZATION_ID secret is required"; exit 1; }
+          [ -n "$PROJECT" ]   || { echo "::error::SIGNPATH_PROJECT_SLUG secret is required"; exit 1; }
 
       # ── Inject version from tag (v0.2.0 → 0.2.0) ──
       - name: Set version from tag
@@ -76,56 +85,35 @@ jobs:
           $env:PATH = "$env:USERPROFILE\go\bin;$env:PATH"
           wails3 build
 
-      # ── Decode signing certificate ──
-      - name: Decode signing certificate
-        shell: pwsh
-        env:
-          CERT_B64: ${{ secrets.SIGN_CERT_B64 }}
-        run: |
-          $bytes = [Convert]::FromBase64String($env:CERT_B64)
-          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", $bytes)
-          if ((Get-Item "$env:RUNNER_TEMP\codesign.pfx").Length -eq 0) {
-            throw "Decoded certificate is empty"
-          }
-          Write-Host "Certificate decoded"
+      # ── Upload unsigned artifact (required by SignPath connector) ──
+      - name: Upload unsigned artifact
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: bin/aiquotaglass.exe
 
-      # ── Locate signtool.exe ──
-      - name: Locate signtool
-        id: signtool
-        shell: pwsh
-        run: |
-          $st = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\signtool.exe' -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending | Select-Object -First 1
-          if (-not $st) { throw "signtool.exe not found" }
-          "path=$($st.FullName)" | Add-Content $env:GITHUB_OUTPUT
-          Write-Host "signtool: $($st.FullName)"
+      # ── Submit to SignPath for Authenticode signing ──
+      - name: Submit signing request
+        id: sign
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: '${{ secrets.SIGNPATH_PROJECT_SLUG }}'
+          signing-policy-slug: 'release-signing'
+          github-artifact-id: '${{ steps.upload-unsigned.outputs.artifact-id }}'
+          wait-for-completion: true
+          output-artifact-directory: 'signed'
 
-      # ── Sign with RFC3161 timestamp ──
-      - name: Sign executable
-        shell: pwsh
-        env:
-          CERT_PW: ${{ secrets.SIGN_CERT_PASSWORD }}
-        run: |
-          & '${{ steps.signtool.outputs.path }}' sign /f "$env:RUNNER_TEMP\codesign.pfx" /p "$env:CERT_PW" `
-            /tr ${{ env.TIMESTAMP_SERVER }} /td sha256 /fd sha256 `
-            "bin\aiquotaglass.exe"
-          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit $LASTEXITCODE" }
-
-      # ── Verify signature ──
-      - name: Verify signature
+      # ── Verify signed exe exists ──
+      - name: Verify signed executable
         shell: pwsh
         run: |
-          & '${{ steps.signtool.outputs.path }}' verify /pa /all "bin\aiquotaglass.exe"
-          if ($LASTEXITCODE -ne 0) { throw "Signature verification failed" }
-          Write-Host "Signature verified"
-
-      # ── Scrub certificate ──
-      - name: Scrub certificate file
-        if: always()
-        shell: pwsh
-        run: |
-          $pfx = "$env:RUNNER_TEMP\codesign.pfx"
-          if (Test-Path $pfx) { Remove-Item $pfx -Force; Write-Host "Certificate removed" }
+          $signed = Get-ChildItem "signed" -Filter *.exe -Recurse | Select-Object -First 1
+          if (-not $signed) { throw "No signed exe found in signed/" }
+          Copy-Item $signed.FullName "bin\aiquotaglass.exe" -Force
+          Write-Host "Signed exe: $($signed.FullName)"
 
       # ── Stage and checksum ──
       - name: Stage release archive
