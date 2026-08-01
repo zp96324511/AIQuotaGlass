@@ -17,6 +17,8 @@ func (w *wailsWindow) SetPosition(x, y int) { w.win.SetPosition(x, y) }
 
 func (w *wailsWindow) Position() (int, int) { return w.win.Position() }
 
+func (w *wailsWindow) SetSize(width, height int) { w.win.SetSize(width, height) }
+
 func (w *wailsWindow) Quit() { w.app.Quit() }
 
 func (w *wailsWindow) Show() { w.win.Show() }

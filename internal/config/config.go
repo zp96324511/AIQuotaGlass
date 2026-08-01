@@ -33,6 +33,7 @@ type AppConfig struct {
 	EdgeDock           bool             `json:"edgeDock"`           // snap window to screen edges
 	AlwaysOnTop        bool             `json:"alwaysOnTop"`        // keep window above others
 	Opacity            float64          `json:"opacity"`            // 0..1 window transparency
+	SnapProviderID     string           `json:"snapProviderID"`     // account shown by the edge snap bar ("" = first enabled)
 	Providers          []ProviderConfig `json:"providers"`
 }
 

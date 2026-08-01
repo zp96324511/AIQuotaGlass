@@ -40,6 +40,7 @@ interface AppConfig {
     edgeDock: boolean;
     alwaysOnTop: boolean;
     opacity: number;
+    snapProviderID?: string;
     providers: ProviderConfig[];
 }
 interface ProviderType {
@@ -67,6 +68,7 @@ let currentConfig: AppConfig | null = null;
 let results: ProviderResult[] = [];
 let draft: AppConfig | null = null; // editable copy while the settings popup is open
 let providerTypes: ProviderType[] = []; // registered (coded) provider adapters
+let snapProvider = ""; // provider shown by the edge-docked bar (from widget:snap)
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -107,7 +109,7 @@ function cloneConfig(c: AppConfig): AppConfig {
 function defaultConfig(): AppConfig {
     return {
         refreshIntervalSec: 300, nativeNotify: true, edgeDock: true,
-        alwaysOnTop: true, opacity: 1, providers: [],
+        alwaysOnTop: true, opacity: 1, snapProviderID: "", providers: [],
     } as AppConfig;
 }
 
@@ -167,6 +169,53 @@ function escapeHtml(s: string): string {
     return s.replace(/[&<>"']/g, c => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]!));
+}
+
+// ---------------------------------------------------------------------------
+// Edge-docked bar (slim mode)
+// ---------------------------------------------------------------------------
+const SNAP_KEYS = ["5h", "weekly", "monthly"] as const;
+const SNAP_LABELS: Record<string, string> = { "5h": "5小时", weekly: "本周", monthly: "本月" };
+
+function snappedDir(): string {
+    return document.body.dataset.snap ?? "";
+}
+
+// updateSnapBar fills the three slim progress bars (5h / weekly / monthly) of
+// the snap provider. The active axis depends on the dock direction.
+function updateSnapBar() {
+    const dir = snappedDir();
+    if (!dir) return;
+    const res = results.find(r => r.providerId === snapProvider && !r.error)
+        ?? results.find(r => !r.error);
+    const cfg = currentConfig;
+    for (const key of SNAP_KEYS) {
+        const fill = $<HTMLDivElement>(`snapFill_${key}`);
+        if (!fill) continue;
+        const w = res?.windows?.find(x => x.key === key);
+        const th = cfg?.providers.find(p => p.id === res?.providerId)?.alertThresholds?.[key] ?? 80;
+        const pct = w ? Math.min(100, Math.max(0, w.percent)) : 0;
+        if (dir === "left" || dir === "right") {
+            fill.style.height = pct + "%";
+        } else {
+            fill.style.width = pct + "%";
+        }
+        fill.classList.toggle("bar-danger", !!w && th > 0 && w.percent >= th);
+        fill.title = w ? `${SNAP_LABELS[key] ?? key} ${fmtPercent(w.percent)}` : (res?.error || "暂无数据");
+    }
+}
+
+// applySnapMode switches between the full widget and the docked bar.
+function applySnapMode(dir: string, providerID: string) {
+    if (providerID) snapProvider = providerID;
+    if (dir) {
+        document.body.dataset.snap = dir;
+        $<HTMLDivElement>("snapBar").classList.remove("hidden");
+        updateSnapBar();
+    } else {
+        delete document.body.dataset.snap;
+        $<HTMLDivElement>("snapBar").classList.add("hidden");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -252,12 +301,22 @@ function renderSettings() {
         </details>`;
     }).join("");
 
+    const snapOpts = cfg.providers.map(p =>
+        `<option value="${escapeHtml(p.id)}" ${p.id === cfg.snapProviderID ? "selected" : ""}>${escapeHtml(p.name)}</option>`
+    ).join("");
+
     body.innerHTML = `
         <div class="global">
             <label>刷新间隔(秒) <input type="number" id="interval" min="30" step="10" value="${cfg.refreshIntervalSec}"/></label>
             <label class="check"><input type="checkbox" id="nativeNotify" ${cfg.nativeNotify ? "checked" : ""}/> 系统通知</label>
             <label class="check"><input type="checkbox" id="edgeDock" ${cfg.edgeDock ? "checked" : ""}/> 贴边吸附</label>
             <label class="check"><input type="checkbox" id="alwaysOnTop" ${cfg.alwaysOnTop ? "checked" : ""}/> 窗口置顶</label>
+            <label>贴边展示账号
+                <select id="snapProvider">
+                    <option value="">自动(第一个启用的账号)</option>
+                    ${snapOpts}
+                </select>
+            </label>
             <label>透明度 <input type="range" id="opacity" min="30" max="100" value="${Math.round((cfg.opacity ?? 1) * 100)}"/> <span id="opacityVal"></span></label>
         </div>
         <div class="providers-sec">${providerForms || '<div class="empty-hint">暂无账号配置, 点击下方 "+ 添加账号"</div>'}</div>`;
@@ -321,6 +380,7 @@ function syncDraftFromDom() {
     draft.nativeNotify = $<HTMLInputElement>("nativeNotify").checked;
     draft.edgeDock = $<HTMLInputElement>("edgeDock").checked;
     draft.alwaysOnTop = $<HTMLInputElement>("alwaysOnTop").checked;
+    draft.snapProviderID = $<HTMLSelectElement>("snapProvider")?.value ?? "";
     draft.opacity = parseInt($<HTMLInputElement>("opacity").value, 10) / 100;
 }
 
@@ -386,6 +446,7 @@ function collectConfig(): AppConfig | null {
         nativeNotify: $<HTMLInputElement>("nativeNotify").checked,
         edgeDock: $<HTMLInputElement>("edgeDock").checked,
         alwaysOnTop: $<HTMLInputElement>("alwaysOnTop").checked,
+        snapProviderID: $<HTMLSelectElement>("snapProvider")?.value ?? "",
         opacity: parseInt($<HTMLInputElement>("opacity").value, 10) / 100,
         providers,
     };
@@ -447,9 +508,17 @@ function initWidget() {
     // Drag release -> edge snap
     document.addEventListener("mouseup", () => AppService.SnapIfNearEdge());
 
+    // Click on the docked bar -> expand back to the full widget
+    $<HTMLDivElement>("snapBar").addEventListener("click", () => AppService.ExpandWidget());
+
     Events.On("usage:update", (e: any) => {
         results = e.data as ProviderResult[];
         render();
+        updateSnapBar();
+    });
+    Events.On("widget:snap", (e: any) => {
+        const d = e.data as { dir: string; providerID: string };
+        applySnapMode(d.dir, d.providerID ?? "");
     });
     Events.On("usage:alert", (e: any) => {
         const d = e.data as { provider: string; window: string; percent: number; threshold: number };

@@ -54,8 +54,8 @@ func main() {
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "AIQuotaGlass",
-		Width:            340,
-		Height:           300,
+		Width:            widgetWidth,
+		Height:           widgetHeight,
 		Frameless:        true,
 		AlwaysOnTop:      cfg.AlwaysOnTop,
 		DisableResize:    true,

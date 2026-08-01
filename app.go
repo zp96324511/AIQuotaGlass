@@ -22,12 +22,23 @@ type windowControl interface {
 	SetAlwaysOnTop(bool)
 	SetPosition(x, y int)
 	Position() (x, y int)
+	SetSize(w, h int)
 	Quit()
 	Show()
 	Hide()
 	Focus()
 	NativeHandle() uintptr
 }
+
+// Widget geometry. When docked to a screen edge the widget collapses into a
+// slim progress bar showing the 5h quota of the snap-provider.
+const (
+	widgetWidth    = 340 // full-size widget width
+	widgetHeight   = 300 // full-size widget height
+	snapBarWidth   = 200 // horizontal bar (docked top/bottom)
+	snapBarHeight  = 44  // vertical bar thickness (docked left/right)
+	snapEscapeStep = 40  // pixels pushed away from the edge on expand
+)
 
 // AppService is the backend surface exposed to the frontend via Wails bindings.
 type AppService struct {
@@ -41,6 +52,8 @@ type AppService struct {
 	mu         sync.Mutex
 	lastStatus []providers.Result
 	alertArmed map[string]bool // providerID/windowKey -> currently above threshold
+
+	snapped string // current edge the widget is docked to ("" = full size)
 }
 
 // setup wires the service to the running application.
@@ -135,6 +148,7 @@ func (s *AppService) applyWindowState() {
 
 // edgeDockLoop continuously snaps the window to screen edges when enabled.
 // Snapping is skipped while the user is actively dragging (left button held).
+// When docked, the widget collapses into a slim progress bar (see setSnapState).
 func (s *AppService) edgeDockLoop() {
 	t := time.NewTicker(800 * time.Millisecond)
 	defer t.Stop()
@@ -144,9 +158,47 @@ func (s *AppService) edgeDockLoop() {
 			continue
 		}
 		if s.win.NativeHandle() != 0 && !mouseLeftDown() {
-			snap(s.win.NativeHandle(), true)
+			s.setSnapState(snap(s.win.NativeHandle(), true))
 		}
 	}
+}
+
+// setSnapState transitions the widget between the full card and the slim edge
+// bar. Docked bars show the 5h quota of the configured snap provider.
+func (s *AppService) setSnapState(dir string) {
+	if dir == s.snapped || s.win == nil {
+		return
+	}
+	s.snapped = dir
+	if dir == "" {
+		s.win.SetSize(widgetWidth, widgetHeight)
+		s.app.Event.Emit("widget:snap", map[string]any{"dir": "", "providerID": ""})
+		return
+	}
+	if dir == "left" || dir == "right" {
+		s.win.SetSize(snapBarHeight, snapBarWidth) // vertical bar
+	} else {
+		s.win.SetSize(snapBarWidth, snapBarHeight) // horizontal bar
+	}
+	s.app.Event.Emit("widget:snap", map[string]any{"dir": dir, "providerID": s.snapProviderID()})
+}
+
+// snapProviderID returns the account whose 5h quota the edge bar shows,
+// falling back to the first enabled provider.
+func (s *AppService) snapProviderID() string {
+	cfg := config.Get()
+	if cfg == nil {
+		return ""
+	}
+	if cfg.SnapProviderID != "" {
+		return cfg.SnapProviderID
+	}
+	for _, p := range cfg.Providers {
+		if p.Enabled {
+			return p.ID
+		}
+	}
+	return ""
 }
 
 // ---- Bindings exposed to the frontend ----
@@ -240,8 +292,31 @@ func (s *AppService) CloseSettings() {
 // SnapIfNearEdge triggers one edge-snap pass (used on drag release).
 func (s *AppService) SnapIfNearEdge() {
 	if s.win != nil && s.win.NativeHandle() != 0 {
-		snap(s.win.NativeHandle(), true)
+		s.setSnapState(snap(s.win.NativeHandle(), true))
 	}
+}
+
+// ExpandWidget restores the widget to its full size and pushes it away from
+// the docked edge so the snap loop does not collapse it again immediately.
+func (s *AppService) ExpandWidget() {
+	if s.win == nil {
+		return
+	}
+	s.win.SetSize(widgetWidth, widgetHeight)
+	x, y := s.win.Position()
+	switch s.snapped {
+	case "left":
+		x += snapEscapeStep
+	case "right":
+		x -= snapEscapeStep
+	case "top":
+		y += snapEscapeStep
+	case "bottom":
+		y -= snapEscapeStep
+	}
+	s.win.SetPosition(x, y)
+	s.snapped = ""
+	s.app.Event.Emit("widget:snap", map[string]any{"dir": "", "providerID": ""})
 }
 
 // ShowMainWindow restores and focuses the widget window (tray click / menu).

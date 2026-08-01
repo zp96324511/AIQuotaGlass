@@ -58,15 +58,16 @@ func workAreaForWindow(hwnd uintptr) (left, top, right, bottom int) {
 }
 
 // SnapToEdge snaps a window flush to the nearest edge of its own monitor
-// when it is close enough. Returns true when the window was moved.
-func SnapToEdge(hwnd uintptr, snap bool) bool {
+// when it is close enough and returns the direction it snapped to
+// ("left"/"right"/"top"/"bottom", or "" when the window was not moved).
+func SnapToEdge(hwnd uintptr, snap bool) string {
 	if !snap {
-		return false
+		return ""
 	}
 	h := w32.HWND(hwnd)
 	rect := w32.GetWindowRect(h)
 	if rect == nil {
-		return false
+		return ""
 	}
 	w := int(rect.Right - rect.Left)
 	hh := int(rect.Bottom - rect.Top)
@@ -100,12 +101,12 @@ func SnapToEdge(hwnd uintptr, snap bool) bool {
 			targetX, targetY = c.x, c.y
 		}
 	}
-	if best == -1 || (dx == 0 && dy == 0) {
-		return false
+	if best == -1 {
+		return ""
 	}
 	w32.SetWindowPos(h, 0, targetX, targetY, 0, 0,
 		w32.SWP_NOSIZE|w32.SWP_NOZORDER|w32.SWP_NOACTIVATE|w32.SWP_NOSENDCHANGING)
-	return true
+	return []string{"left", "right", "top", "bottom"}[best]
 }
 
 // WindowBounds returns the current window position and size.

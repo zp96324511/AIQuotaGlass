@@ -12,9 +12,10 @@ const vkLButton = 0x01
 
 var procGetAsyncKeyState = syscall.NewLazyDLL("user32.dll").NewProc("GetAsyncKeyState")
 
-// snap delegates to the platform edge-snap implementation.
-func snap(hwnd uintptr, on bool) {
-	edge.SnapToEdge(hwnd, on)
+// snap delegates to the platform edge-snap implementation and returns the
+// direction the window snapped to ("" when it was not moved).
+func snap(hwnd uintptr, on bool) string {
+	return edge.SnapToEdge(hwnd, on)
 }
 
 // mouseLeftDown reports whether the primary mouse button is currently held,

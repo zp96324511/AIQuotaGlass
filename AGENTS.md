@@ -66,7 +66,7 @@ frontend/                   玻璃拟态 UI;src/main.ts 双窗口模式,public/s
 3. 验证 opencode 接口用 `curl.exe`,**不要用** `Invoke-WebRequest`(会 302 跳 OpenAuth 登录页)。
 4. Wails v3 alpha **没有内置通知 API**——toast 走 PowerShell WinRT(`internal/notify/notify_windows.go`),每次告警起一个隐藏 powershell 进程。
 5. 透明窗口:`BackgroundTypeTransparent` 创建时生效;运行时透明度**必须走前端 CSS**(`document.body.style.opacity`)。原生 SetLayeredWindowAttributes(WS_EX_LAYERED)与 DirectComposition 冲突会破坏渲染——不要再走原生路径。
-6. 贴边:每 800ms 轮询 `edge.SnapToEdge`(拖拽中左键按下时跳过,见 `snap_windows.go` 的 `mouseLeftDown`)+ 前端 `mouseup` 调 `SnapIfNearEdge()`。拖拽用 `--wails-draggable: drag`。
+6. 贴边=缩条:每 800ms 轮询 `edge.SnapToEdge`(拖拽中左键按下时跳过,见 `snap_windows.go` 的 `mouseLeftDown`)+ 前端 `mouseup` 调 `SnapIfNearEdge()`。贴边后窗口自动缩成进度条(竖条 44x200 贴左右、横条 200x44 贴上下,见 `app.go` 的 `setSnapState`),显示 `snapProviderID`(设置面板「贴边展示账号」,空=第一个启用账号)的 5h/周/月 三条进度;点条 `ExpandWidget()` 恢复 340x300 并偏移 40px 离开吸附区。前端 `widget:snap` 事件({dir,providerID})切换形态。`SnapToEdge` 返回方向字符串,**窗口已贴边时也返回方向**(勿改回空串,否则缩条不触发)。拖拽用 `--wails-draggable: drag`。
 7. WebView2 远程调试(仅调试):`Windows.AdditionalBrowserArgs: ["--remote-debugging-port=9223"]`,然后 CDP `Runtime.evaluate` 读 DOM。发布版必须移除。
 8. `wails3 build` 默认 `CGO_ENABLED=0`,纯 Go,无需 gcc。`-tags production`。
 9. 绑定接口参数警告:任何导出方法带接口/函数类型都会生成 `any` 并运行时报错——规避。
