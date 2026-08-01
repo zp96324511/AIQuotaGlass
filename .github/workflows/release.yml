@@ -1,18 +1,8 @@
 name: Release
 
-# Triggered by version tags (v*). Builds, submits to SignPath for Authenticode
-# signing (free for OSS), packages, and publishes a GitHub Release.
-# The signing step is fail-closed: if SIGNPATH_* secrets are missing, the job
-# fails and no release is published.
-#
-# Prerequisites (see docs/SIGNPATH_SETUP.md):
-#   1. Apply at https://signpath.org/apply (free for open-source)
-#   2. Install the SignPath GitHub App on this repository
-#   3. Configure a SignPath project with Authenticode artifact config
-#   4. Add secrets: SIGNPATH_API_TOKEN, SIGNPATH_ORGANIZATION_ID,
-#      SIGNPATH_PROJECT_SLUG
-#
-# PR / main builds are handled by ci.yml (unsigned, never signs, never releases).
+# Triggered by version tags (v*). Builds, packages, and publishes a GitHub
+# Release (unsigned). No signing — run `git tag vX.Y.Z && git push origin vX.Y.Z`
+# to publish.
 
 on:
   push:
@@ -21,7 +11,6 @@ on:
 
 permissions:
   contents: write
-  actions: read
 
 env:
   GO_VERSION: '1.25'
@@ -29,7 +18,7 @@ env:
 
 jobs:
   release:
-    name: Build, Sign & Release
+    name: Build & Release
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -49,30 +38,16 @@ jobs:
         shell: pwsh
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
 
-      # ── Fail-closed: refuse to proceed without SignPath secrets ──
-      - name: Assert SignPath secrets present
-        shell: bash
-        env:
-          API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          ORG_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-          PROJECT: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
-        run: |
-          [ -n "$API_TOKEN" ] || { echo "::error::SIGNPATH_API_TOKEN secret is required for releases"; exit 1; }
-          [ -n "$ORG_ID" ]    || { echo "::error::SIGNPATH_ORGANIZATION_ID secret is required"; exit 1; }
-          [ -n "$PROJECT" ]   || { echo "::error::SIGNPATH_PROJECT_SLUG secret is required"; exit 1; }
-
       # ── Inject version from tag (v0.2.0 → 0.2.0) ──
       - name: Set version from tag
         shell: pwsh
         run: |
           $ver = "${{ github.ref_name }}".TrimStart('v')
           Write-Host "Version: $ver"
-          # Update info.json
           $info = Get-Content -Raw 'build/windows/info.json' | ConvertFrom-Json
           $info.fixed.file_version = $ver
           $info.info.'0000'.ProductVersion = $ver
           $info | ConvertTo-Json -Depth 5 | Set-Content -NoNewline 'build/windows/info.json'
-          # Update config.yml version
           $cfg = Get-Content -Raw 'build/config.yml'
           $cfg = $cfg -replace 'version:\s*"[^"]*"', "version: `"$ver`""
           Set-Content -NoNewline 'build/config.yml' $cfg
@@ -84,36 +59,6 @@ jobs:
         run: |
           $env:PATH = "$env:USERPROFILE\go\bin;$env:PATH"
           wails3 build
-
-      # ── Upload unsigned artifact (required by SignPath connector) ──
-      - name: Upload unsigned artifact
-        id: upload-unsigned
-        uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-exe
-          path: bin/aiquotaglass.exe
-
-      # ── Submit to SignPath for Authenticode signing ──
-      - name: Submit signing request
-        id: sign
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
-          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
-          project-slug: '${{ secrets.SIGNPATH_PROJECT_SLUG }}'
-          signing-policy-slug: 'release-signing'
-          github-artifact-id: '${{ steps.upload-unsigned.outputs.artifact-id }}'
-          wait-for-completion: true
-          output-artifact-directory: 'signed'
-
-      # ── Verify signed exe exists ──
-      - name: Verify signed executable
-        shell: pwsh
-        run: |
-          $signed = Get-ChildItem "signed" -Filter *.exe -Recurse | Select-Object -First 1
-          if (-not $signed) { throw "No signed exe found in signed/" }
-          Copy-Item $signed.FullName "bin\aiquotaglass.exe" -Force
-          Write-Host "Signed exe: $($signed.FullName)"
 
       # ── Stage and checksum ──
       - name: Stage release archive
@@ -127,7 +72,6 @@ jobs:
           Copy-Item "README.md" "$stage\README.md"
           Copy-Item "LICENSE" "$stage\LICENSE"
           Compress-Archive -Path "$stage\*" -DestinationPath "stage\$pkgName.zip" -CompressionLevel Optimal -Force
-          # SHA-256 of the signed archive
           $hash = (Get-FileHash "stage\$pkgName.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $pkgName.zip" | Set-Content -NoNewline "stage\$pkgName.sha256"
           Get-Content "stage\$pkgName.sha256"
