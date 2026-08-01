@@ -55,7 +55,8 @@ type AppService struct {
 	lastStatus []providers.Result
 	alertArmed map[string]bool // providerID/windowKey -> currently above threshold
 
-	snapped string // current edge the widget is docked to ("" = full size)
+	snapMu  sync.Mutex // serializes snap state with native window geometry changes
+	snapped string     // current edge the widget is docked to ("" = full size)
 }
 
 // setup wires the service to the running application.
@@ -160,14 +161,15 @@ func (s *AppService) edgeDockLoop() {
 			continue
 		}
 		if s.win.NativeHandle() != 0 && !mouseLeftDown() {
-			s.setSnapState(snap(s.win.NativeHandle(), true))
+			s.snapMu.Lock()
+			s.setSnapStateLocked(snap(s.win.NativeHandle(), true))
+			s.snapMu.Unlock()
 		}
 	}
 }
 
-// setSnapState transitions the widget between the full card and the slim edge
-// bar. Docked bars show the 5h quota of the configured snap provider.
-func (s *AppService) setSnapState(dir string) {
+// setSnapStateLocked transitions the widget while snapMu is held.
+func (s *AppService) setSnapStateLocked(dir string) {
 	if dir == s.snapped || s.win == nil {
 		return
 	}
@@ -177,14 +179,27 @@ func (s *AppService) setSnapState(dir string) {
 		s.app.Event.Emit("widget:snap", map[string]any{"dir": "", "providerID": ""})
 		return
 	}
+	var barW, barH int
 	if dir == "left" || dir == "right" {
-		s.win.SetSize(snapBarHeight, snapBarWidth) // vertical bar
+		barW, barH = snapBarHeight, snapBarWidth // vertical bar
 	} else {
-		s.win.SetSize(snapBarWidth, snapBarHeight) // horizontal bar
+		barW, barH = snapBarWidth, snapBarHeight // horizontal bar
 	}
-	// SetSize keeps the top-left corner; re-flush right/bottom-docked bars.
-	if hwnd := s.win.NativeHandle(); hwnd != 0 && (dir == "right" || dir == "bottom") {
-		edge.ReAnchor(hwnd, dir)
+	s.win.SetSize(barW, barH)
+	// SetSize keeps the top-left corner, so right/bottom-docked bars must be
+	// pushed flush with the edge. Win32 SetWindowPos (edge.ReAnchor) is silently
+	// overridden by Wails v3's window manager, so reposition via the Wails API.
+	if dir == "right" || dir == "bottom" {
+		if hwnd := s.win.NativeHandle(); hwnd != 0 {
+			_, _, right, bottom := edge.WorkAreaForWindow(hwnd)
+			x, y := s.win.Position()
+			if dir == "right" {
+				x = right - barW
+			} else {
+				y = bottom - barH
+			}
+			s.win.SetPosition(x, y)
+		}
 	}
 	s.app.Event.Emit("widget:snap", map[string]any{"dir": dir, "providerID": s.snapProviderID()})
 }
@@ -300,37 +315,22 @@ func (s *AppService) CloseSettings() {
 // SnapIfNearEdge triggers one edge-snap pass (used on drag release).
 func (s *AppService) SnapIfNearEdge() {
 	if s.win != nil && s.win.NativeHandle() != 0 {
-		s.setSnapState(snap(s.win.NativeHandle(), true))
+		s.snapMu.Lock()
+		s.setSnapStateLocked(snap(s.win.NativeHandle(), true))
+		s.snapMu.Unlock()
 	}
 }
 
 // ExpandWidget restores the widget to its full size and pushes it away from
 // the docked edge so the snap loop does not collapse it again immediately.
 func (s *AppService) ExpandWidget() {
+	s.snapMu.Lock()
+	defer s.snapMu.Unlock()
 	if s.win == nil {
 		return
 	}
-	s.win.SetSize(widgetWidth, widgetHeight)
-	x, y := s.win.Position()
-	switch s.snapped {
-	case "left":
-		x += snapEscapeStep
-	case "top":
-		y += snapEscapeStep
-	case "right", "bottom":
-		// SetSize keeps the top-left corner, so right/bottom-docked windows
-		// would overflow off-screen; clamp them inside the work area first,
-		// then leave a margin so the snap loop does not re-collapse them.
-		if hwnd := s.win.NativeHandle(); hwnd != 0 {
-			_, _, r, b := edge.WorkAreaForWindow(hwnd)
-			if s.snapped == "right" {
-				x = r - widgetWidth - snapEscapeStep
-			} else {
-				y = b - widgetHeight - snapEscapeStep
-			}
-		}
-	}
-	s.win.SetPosition(x, y)
+	dir := s.snapped
+	expandWidgetGeometry(s.win, dir, edge.WorkAreaForWindow)
 	s.snapped = ""
 	s.app.Event.Emit("widget:snap", map[string]any{"dir": "", "providerID": ""})
 }
