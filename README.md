@@ -61,6 +61,15 @@ wails3 build          # 生产构建: bin\aiquotaglass.exe
 
 凭据由用户自行从厂商控制台 / DevTools 复制，应用不接触浏览器，不记录、不上传任何使用数据。
 
+## 关于杀毒软件误报
+
+部分杀毒软件可能对本程序报毒，属误报：
+
+- 本项目的全部代码由 AI（DeepSeek V4 Flash 等）vibe coding 生成，仓库内源码完全公开可审；
+- 发布包由 GitHub Actions 自动构建，未进行代码签名，部分杀软会因此弹报毒提示；
+- 程序需读取网络数据、写入配置、显示系统通知，行为均可在源码中核实；
+- 项目以自用为主，介意误报的可用 AI 辅助分析源码后自行构建（`wails3 build`），产物行为完全一致。
+
 ## 技术栈
 
 Go 1.25 + [Wails v3](https://v3.wails.io)（alpha2.119，锁定）+ WebView2 + 原生 TypeScript / Vite，无前端框架依赖。
