@@ -47,10 +47,10 @@ jobs:
           $info = Get-Content -Raw 'build/windows/info.json' | ConvertFrom-Json
           $info.fixed.file_version = $ver
           $info.info.'0000'.ProductVersion = $ver
-          $info | ConvertTo-Json -Depth 5 | Set-Content -NoNewline 'build/windows/info.json'
+          $info | ConvertTo-Json -Depth 5 | Set-Content 'build/windows/info.json'
           $cfg = Get-Content -Raw 'build/config.yml'
           $cfg = $cfg -replace 'version:\s*"[^"]*"', "version: `"$ver`""
-          Set-Content -NoNewline 'build/config.yml' $cfg
+          Set-Content 'build/config.yml' $cfg
           Write-Host "Injected version $ver"
 
       # ── Build ──
