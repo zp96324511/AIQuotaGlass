@@ -13,19 +13,19 @@ type Notifier interface {
 
 var impl Notifier = newNotifier()
 
-// BindHWND attaches the owner window handle so platform implementations
-// that need it (e.g. Shell_NotifyIconW) can register their notification
-// icon. It is safe to call before the first Show; on platforms that don't
-// need an HWND it is a no-op.
-func BindHWND(hwnd uintptr) {
+// BindHWNDProvider registers a function that returns the owner window
+// handle. The HWND is resolved lazily on the first Show() call, so it is
+// safe to call before the window has been created (e.g. before app.Run()).
+// On platforms that don't need an HWND it is a no-op.
+func BindHWNDProvider(provider func() uintptr) {
 	if binder, ok := impl.(hwndBinder); ok {
-		binder.bindHWND(hwnd)
+		binder.bindHWNDProvider(provider)
 	}
 }
 
 // hwndBinder is implemented by platform notifiers that need a window handle.
 type hwndBinder interface {
-	bindHWND(uintptr)
+	bindHWNDProvider(func() uintptr)
 }
 
 // ShowE dispatches a native notification and returns any error.

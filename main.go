@@ -87,9 +87,10 @@ func main() {
 
 	setupTray(app, svc)
 
-	// Bind the main window handle so the native balloon notifier can
-	// register its hidden Shell_NotifyIconW icon (replaces PowerShell toast).
-	notify.BindHWND(uintptr(win.NativeWindow()))
+	// Register a lazy HWND provider for the native balloon notifier. The
+	// window is not realised until app.Run() starts the event loop, so we
+	// pass a closure that resolves the handle on the first Show() call.
+	notify.BindHWNDProvider(func() uintptr { return uintptr(win.NativeWindow()) })
 
 	err = app.Run()
 	if err != nil {

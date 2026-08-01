@@ -15,28 +15,32 @@ import (
 // no script file is written — the call is an in-process Win32 syscall,
 // which eliminates the AV heuristic triggered by the old PowerShell bridge.
 type windowsNotifier struct {
-	mu   sync.Mutex
-	hwnd uintptr // owner window (set via bindHWND from AppService.setup)
-	uid  uint32  // notification icon identifier
-	added bool   // whether NIM_ADD has been issued
+	mu       sync.Mutex
+	hwndFunc func() uintptr // owner window provider (set via bindHWNDProvider)
+	uid      uint32         // notification icon identifier
+	added    bool           // whether NIM_ADD has been issued
 }
 
 func newNotifier() Notifier { return &windowsNotifier{uid: notifyUID} }
 
-func (n *windowsNotifier) bindHWND(hwnd uintptr) {
+func (n *windowsNotifier) bindHWNDProvider(f func() uintptr) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.hwnd = hwnd
+	n.hwndFunc = f
 }
 
 func (n *windowsNotifier) Show(_ context.Context, title, message string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.hwnd == 0 {
+	hwnd := uintptr(0)
+	if n.hwndFunc != nil {
+		hwnd = n.hwndFunc()
+	}
+	if hwnd == 0 {
 		return errNoHWND
 	}
 	if !n.added {
-		nid := buildNID(n.hwnd, n.uid, title, message)
+		nid := buildNID(hwnd, n.uid, title, message)
 		nid.UFlags = w32.NIF_ICON | w32.NIF_TIP | w32.NIF_INFO
 		nid.HIcon = defaultIcon()
 		nid.DwState = w32.NIS_HIDDEN // hide the persistent tray icon; balloon still shows
@@ -46,7 +50,7 @@ func (n *windowsNotifier) Show(_ context.Context, title, message string) error {
 		n.added = true
 		return nil
 	}
-	nid := buildNID(n.hwnd, n.uid, title, message)
+	nid := buildNID(hwnd, n.uid, title, message)
 	nid.UFlags = w32.NIF_INFO
 	if !w32.ShellNotifyIcon(w32.NIM_MODIFY, nid) {
 		return errModifyFailed
