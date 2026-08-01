@@ -33,6 +33,7 @@ interface ProviderConfig {
     cookie?: string;
     alertThresholds: Record<string, number>;
     detail?: { showUsageDetail?: boolean };
+    sortOrder?: number;
 }
 interface AppConfig {
     refreshIntervalSec: number;
@@ -196,10 +197,14 @@ function updateSnapBar() {
         const th = cfg?.providers.find(p => p.id === res?.providerId)?.alertThresholds?.[key] ?? 80;
         const pct = w ? Math.min(100, Math.max(0, w.percent)) : 0;
         if (dir === "left" || dir === "right") {
+            fill.style.width = "100%";
             fill.style.height = pct + "%";
         } else {
+            fill.style.height = "100%";
             fill.style.width = pct + "%";
         }
+        const percent = $<HTMLSpanElement>(`snapPct_${key}`);
+        if (percent) percent.textContent = Math.round(pct) + "%";
         fill.classList.toggle("bar-danger", !!w && th > 0 && w.percent >= th);
         fill.title = w ? `${SNAP_LABELS[key] ?? key} ${fmtPercent(w.percent)}` : (res?.error || "暂无数据");
     }
@@ -284,6 +289,7 @@ function renderSettings() {
             </summary>
             <div class="fields">
                 <input type="hidden" id="id_${i}" value="${escapeHtml(p.id)}"/>
+                <label class="type-row">排序号 <input type="number" id="sort_${i}" min="0" value="${p.sortOrder ?? i}"/></label>
                 <label class="type-row">厂商类型
                     <select id="type_${i}">${typesOpts}</select>
                 </label>
@@ -313,7 +319,7 @@ function renderSettings() {
             <label class="check"><input type="checkbox" id="alwaysOnTop" ${cfg.alwaysOnTop ? "checked" : ""}/> 窗口置顶</label>
             <label>贴边展示账号
                 <select id="snapProvider">
-                    <option value="">自动(第一个启用的账号)</option>
+                    <option value="">自动(第一个账号)</option>
                     ${snapOpts}
                 </select>
             </label>
@@ -354,6 +360,7 @@ function readProviderFromDom(i: number): ProviderConfig {
             monthly: clampInt($<HTMLInputElement>(`thm_${i}`).value, 0, 100),
         },
         detail: {},
+        sortOrder: clampInt($<HTMLInputElement>(`sort_${i}`)?.value ?? "", 0, 9999) || i,
     };
     fieldsFor(type).forEach(f => {
         if (!isValueField(f)) return;
@@ -408,6 +415,7 @@ function addProvider() {
         cookie: "",
         alertThresholds: { "5h": 80, weekly: 80, monthly: 80 },
         detail: {},
+        sortOrder: draft.providers.length,
     });
     renderSettings();
 }

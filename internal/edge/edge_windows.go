@@ -41,6 +41,12 @@ func WorkArea() (left, top, right, bottom int) {
 	return int(rc.Left), int(rc.Top), int(rc.Right), int(rc.Bottom)
 }
 
+// WorkAreaForWindow returns the work area of the monitor the window is on,
+// falling back to the primary monitor work area when the lookup fails.
+func WorkAreaForWindow(hwnd uintptr) (left, top, right, bottom int) {
+	return workAreaForWindow(hwnd)
+}
+
 // workAreaForWindow returns the work area of the monitor the window is on,
 // falling back to the primary monitor work area when the lookup fails.
 func workAreaForWindow(hwnd uintptr) (left, top, right, bottom int) {
@@ -79,16 +85,19 @@ func SnapToEdge(hwnd uintptr, snap bool) string {
 	var targetX, targetY int
 	dx, dy := 0, 0
 
+	// A candidate qualifies when the window edge is within the threshold of the
+	// work-area edge OR has already overflowed past it (negative distance), so a
+	// window partially dragged off-screen also snaps back and collapses.
 	candidates := []struct {
 		id int
 		ok bool
 		x  int
 		y  int
 	}{
-		{0, abs(curX-left) <= snapThreshold, left, curY},
-		{1, abs((right-w)-curX) <= snapThreshold, right - w, curY},
-		{2, abs(curY-top) <= snapThreshold, curX, top},
-		{3, abs((bottom-hh)-curY) <= snapThreshold, curX, bottom - hh},
+		{0, curX-left <= snapThreshold, left, curY},
+		{1, (right - w) - curX <= snapThreshold, right - w, curY},
+		{2, curY-top <= snapThreshold, curX, top},
+		{3, (bottom - hh) - curY <= snapThreshold, curX, bottom - hh},
 	}
 	for _, c := range candidates {
 		if !c.ok {
@@ -107,6 +116,31 @@ func SnapToEdge(hwnd uintptr, snap bool) string {
 	w32.SetWindowPos(h, 0, targetX, targetY, 0, 0,
 		w32.SWP_NOSIZE|w32.SWP_NOZORDER|w32.SWP_NOACTIVATE|w32.SWP_NOSENDCHANGING)
 	return []string{"left", "right", "top", "bottom"}[best]
+}
+
+// ReAnchor keeps a docked window flush with its edge after a size change.
+// SetSize keeps the top-left corner, so right/bottom-docked bars drift off
+// the edge; snap them back.
+func ReAnchor(hwnd uintptr, dir string) {
+	if dir != "right" && dir != "bottom" {
+		return
+	}
+	_, _, right, bottom := workAreaForWindow(hwnd)
+	rect := w32.GetWindowRect(w32.HWND(hwnd))
+	if rect == nil {
+		return
+	}
+	w := int(rect.Right - rect.Left)
+	hh := int(rect.Bottom - rect.Top)
+	x, y := int(rect.Left), int(rect.Top)
+	switch dir {
+	case "right":
+		x = right - w
+	case "bottom":
+		y = bottom - hh
+	}
+	w32.SetWindowPos(w32.HWND(hwnd), 0, x, y, 0, 0,
+		w32.SWP_NOSIZE|w32.SWP_NOZORDER|w32.SWP_NOACTIVATE|w32.SWP_NOSENDCHANGING)
 }
 
 // WindowBounds returns the current window position and size.

@@ -15,6 +15,13 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+button, input, select, summary { -webkit-tap-highlight-color: transparent; }
+button:focus, input:focus, select:focus, summary:focus { outline: none; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+    outline: 1px solid rgba(90, 167, 255, 0.55);
+    outline-offset: 1px;
+}
+
 html, body {
     background: transparent;
     height: 100%;
@@ -72,7 +79,7 @@ html, body {
     transition: background 0.15s, color 0.15s;
 }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
-.icon-btn.danger:hover { color: var(--danger); }
+.icon-btn.danger:hover { color: var(--text); }
 
 /* ---- Provider cards ---- */
 .providers {
@@ -154,17 +161,17 @@ html, body {
 }
 .snap-bar.hidden { display: none; }
 
-/* Docked left/right: three vertical bars side by side in a row */
+/* Docked left/right (vertical window): three bars stacked top-to-bottom */
 body[data-snap="left"] .snap-bar,
 body[data-snap="right"] .snap-bar {
-    flex-direction: row;
+    flex-direction: column;
     align-items: stretch;
     gap: 3px;
 }
-/* Docked top/bottom: three horizontal bars stacked in a column */
+/* Docked top/bottom (horizontal window): three bars side by side */
 body[data-snap="top"] .snap-bar,
 body[data-snap="bottom"] .snap-bar {
-    flex-direction: column;
+    flex-direction: row;
     align-items: stretch;
     gap: 3px;
 }
@@ -172,23 +179,28 @@ body[data-snap="bottom"] .snap-bar {
 .snap-seg { flex: 1; min-width: 6px; min-height: 6px; display: flex; }
 
 .snap-track {
+    position: relative;
     flex: 1;
     background: rgba(255, 255, 255, 0.09);
     border-radius: 999px;
     overflow: hidden;
     display: flex;
 }
+/* Vertical window: each bar grows from the bottom */
 body[data-snap="left"] .snap-track,
 body[data-snap="right"] .snap-track {
     flex-direction: column;
     justify-content: flex-end;
 }
+/* Horizontal window: each bar grows from the left */
 body[data-snap="top"] .snap-track,
 body[data-snap="bottom"] .snap-track {
     flex-direction: row;
 }
 
 .snap-fill {
+    position: relative;
+    z-index: 0;
     width: 100%;
     height: 100%;
     border-radius: 999px;
@@ -204,6 +216,21 @@ body[data-snap="bottom"] .snap-fill { height: 100%; width: 0%; }
 .snap-fill.kweekly { background: linear-gradient(135deg, var(--accent-2), #8f7bff); }
 .snap-fill.kmonthly { background: linear-gradient(135deg, var(--warn), #f58b4c); }
 .snap-fill.bar-danger { background: linear-gradient(135deg, #ff6b6b, #ff4d4d); }
+.snap-percent {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    color: #f7f9ff;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+    pointer-events: none;
+    white-space: nowrap;
+}
 
 /* While docked the full card and title bar are hidden. */
 body[data-snap] .widget .titlebar,

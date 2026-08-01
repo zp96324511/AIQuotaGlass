@@ -11,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"aiquotaglass/internal/config"
+	"aiquotaglass/internal/edge"
 	"aiquotaglass/internal/notify"
 	"aiquotaglass/internal/providers"
 	"aiquotaglass/internal/scheduler"
@@ -31,12 +32,13 @@ type windowControl interface {
 }
 
 // Widget geometry. When docked to a screen edge the widget collapses into a
-// slim progress bar showing the 5h quota of the snap-provider.
+// slim bar: three stacked quota bars (left/right) or three side-by-side quota
+// bars (top/bottom).
 const (
 	widgetWidth    = 340 // full-size widget width
 	widgetHeight   = 300 // full-size widget height
-	snapBarWidth   = 200 // horizontal bar (docked top/bottom)
-	snapBarHeight  = 44  // vertical bar thickness (docked left/right)
+	snapBarWidth   = 150 // bar length (vertical bar height / horizontal bar width)
+	snapBarHeight  = 44  // bar thickness
 	snapEscapeStep = 40  // pixels pushed away from the edge on expand
 )
 
@@ -180,11 +182,16 @@ func (s *AppService) setSnapState(dir string) {
 	} else {
 		s.win.SetSize(snapBarWidth, snapBarHeight) // horizontal bar
 	}
+	// SetSize keeps the top-left corner; re-flush right/bottom-docked bars.
+	if hwnd := s.win.NativeHandle(); hwnd != 0 && (dir == "right" || dir == "bottom") {
+		edge.ReAnchor(hwnd, dir)
+	}
 	s.app.Event.Emit("widget:snap", map[string]any{"dir": dir, "providerID": s.snapProviderID()})
 }
 
-// snapProviderID returns the account whose 5h quota the edge bar shows,
-// falling back to the first enabled provider.
+// snapProviderID returns the account whose quota the edge bar shows. When no
+// account is explicitly chosen it falls back to the first one in list order
+// (which follows the user's SortOrder).
 func (s *AppService) snapProviderID() string {
 	cfg := config.Get()
 	if cfg == nil {
@@ -193,10 +200,8 @@ func (s *AppService) snapProviderID() string {
 	if cfg.SnapProviderID != "" {
 		return cfg.SnapProviderID
 	}
-	for _, p := range cfg.Providers {
-		if p.Enabled {
-			return p.ID
-		}
+	if len(cfg.Providers) > 0 {
+		return cfg.Providers[0].ID
 	}
 	return ""
 }
@@ -262,19 +267,22 @@ func (s *AppService) OpenSettings() {
 		s.settingsWin.Focus()
 		return
 	}
-	w := s.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:             "settings",
-		Title:            "AIQuotaGlass 设置",
-		Width:            460,
-		Height:           640,
-		Frameless:        true,
-		AlwaysOnTop:      true,
-		DisableResize:    true,
-		BackgroundType:   application.BackgroundTypeSolid,
-		BackgroundColour: application.NewRGBA(24, 26, 36, 255),
-		Windows:          application.WindowsWindow{DisableFramelessWindowDecorations: true},
-		URL:              "/?settings=1",
-	})
+		w := s.app.Window.NewWithOptions(application.WebviewWindowOptions{
+			Name:                "settings",
+			Title:               "AIQuotaGlass 设置",
+			Width:               460,
+			Height:              640,
+			Frameless:           true,
+			AlwaysOnTop:         true,
+			DisableResize:       true,
+			MinimiseButtonState: application.ButtonHidden,
+			MaximiseButtonState: application.ButtonHidden,
+			CloseButtonState:    application.ButtonHidden,
+			BackgroundType:      application.BackgroundTypeSolid,
+			BackgroundColour:    application.NewRGBA(24, 26, 36, 255),
+			Windows:          application.WindowsWindow{DisableFramelessWindowDecorations: true},
+			URL:              "/?settings=1",
+		})
 	s.settingsWin = w
 	w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 		s.settingsWin = nil
@@ -307,12 +315,20 @@ func (s *AppService) ExpandWidget() {
 	switch s.snapped {
 	case "left":
 		x += snapEscapeStep
-	case "right":
-		x -= snapEscapeStep
 	case "top":
 		y += snapEscapeStep
-	case "bottom":
-		y -= snapEscapeStep
+	case "right", "bottom":
+		// SetSize keeps the top-left corner, so right/bottom-docked windows
+		// would overflow off-screen; clamp them inside the work area first,
+		// then leave a margin so the snap loop does not re-collapse them.
+		if hwnd := s.win.NativeHandle(); hwnd != 0 {
+			_, _, r, b := edge.WorkAreaForWindow(hwnd)
+			if s.snapped == "right" {
+				x = r - widgetWidth - snapEscapeStep
+			} else {
+				y = b - widgetHeight - snapEscapeStep
+			}
+		}
 	}
 	s.win.SetPosition(x, y)
 	s.snapped = ""

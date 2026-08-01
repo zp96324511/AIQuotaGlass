@@ -53,16 +53,19 @@ func main() {
 	})
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "AIQuotaGlass",
-		Width:            widgetWidth,
-		Height:           widgetHeight,
-		Frameless:        true,
-		AlwaysOnTop:      cfg.AlwaysOnTop,
-		DisableResize:    true,
-		BackgroundType:   application.BackgroundTypeTransparent,
-		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+		Title:              "AIQuotaGlass",
+		Width:              widgetWidth,
+		Height:             widgetHeight,
+		Frameless:          true,
+		AlwaysOnTop:        cfg.AlwaysOnTop,
+		DisableResize:      true,
+		MinimiseButtonState: application.ButtonHidden,
+		MaximiseButtonState: application.ButtonHidden,
+		CloseButtonState:    application.ButtonHidden,
+		BackgroundType:      application.BackgroundTypeTransparent,
+		BackgroundColour:    application.NewRGBA(0, 0, 0, 0),
 		Windows: application.WindowsWindow{
-			DisableFramelessWindowDecorations: false,
+			DisableFramelessWindowDecorations: true,
 			HiddenOnTaskbar:                   true,
 		},
 		URL: "/",

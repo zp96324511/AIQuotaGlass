@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -19,6 +20,7 @@ type ProviderConfig struct {
 	Cookie          string            `json:"cookie,omitempty"`    // session cookie (encrypted on disk, plaintext in memory)
 	AlertThresholds map[string]int    `json:"alertThresholds"`     // window key -> percent threshold
 	Detail          ProviderDetailCfg `json:"detail,omitempty"`    // optional extended fields
+	SortOrder       int               `json:"sortOrder"`           // lower sorts first in the list and snap default
 }
 
 // ProviderDetailCfg holds provider specific knobs.
@@ -130,6 +132,10 @@ func Save(cfg *AppConfig) error {
 	defer mu.Unlock()
 
 	out := clone(cfg)
+	// Sort providers by SortOrder (stable) so the list order and the
+	// snap-default account follow the user's numbering.
+	sortByOrder(out.Providers)
+	sortByOrder(cfg.Providers)
 	for i := range out.Providers {
 		// Normalize: strip a leading "auth=" prefix users often copy from the
 		// DevTools Cookie header (the provider re-adds it when sending).
@@ -170,4 +176,10 @@ func clone(cfg *AppConfig) *AppConfig {
 		}
 	}
 	return &out
+}
+
+// sortByOrder stably orders providers by SortOrder ascending; equal keys keep
+// their relative order.
+func sortByOrder(ps []ProviderConfig) {
+	sort.SliceStable(ps, func(i, j int) bool { return ps[i].SortOrder < ps[j].SortOrder })
 }
