@@ -10,11 +10,12 @@ Windows 桌面悬浮工具:多厂商 AI 套餐/API 用量定时自动刷新与�
 ## 常用命令
 
 ```powershell
-# 环境变量必须先设(C: 盘满,全部指向 D:)
-$env:GOPATH='D:\gocache'; $env:GOMODCACHE='D:\gocache\pkg\mod'
-$env:GOCACHE='D:\gocache\build'; $env:GOTMPDIR='D:\gocache\tmp'
-$env:PATH="D:\gocache\bin;$env:PATH"     # wails3 CLI
-$env:AQUOTA_CONFIG_DIR='D:\aiquotaglass\data'   # 运行时:配置+WebView2数据
+# (可选) 本机磁盘空间紧张时，可用环境变量把 Go 缓存 / wails3 CLI / 运行数据
+# 目录重定向到其他分区，例如:
+# $env:GOPATH='D:\gocache'; $env:GOMODCACHE='D:\gocache\pkg\mod'
+# $env:GOCACHE='D:\gocache\build'; $env:GOTMPDIR='D:\gocache\tmp'
+# $env:PATH="D:\gocache\bin;$env:PATH"          # wails3 CLI
+# $env:AQUOTA_CONFIG_DIR='D:\aiquotaglass\data' # 运行时:配置+WebView2数据
 
 # 构建(生产,输出 bin\aiquotaglass.exe)
 wails3 build
@@ -25,8 +26,6 @@ go build -o bin\debug.exe .
 go vet ./...
 go test ./...
 ```
-
-注意:User 级环境变量已持久化;每次新 shell 用 `go build`/`wails3` 前仍需设置(除非重开终端)。
 
 ## 架构地图
 
@@ -61,7 +60,7 @@ frontend/                   玻璃拟态 UI;src/main.ts 双窗口模式,public/s
 
 ## 已知坑(踩过)
 
-1. **C: 盘 0 字节空闲**。所有写盘路径必须 D:。无 `AQUOTA_CONFIG_DIR` 时应用会在 AppData 写配置失败。
+1. **默认数据目录不可写时的应对**:`config.json` 与 WebView2 数据默认写 `os.UserConfigDir()`(Windows 为 `%AppData%\AIQuotaGlass`);该分区空间不足时应用启动会失败——用 `AQUOTA_CONFIG_DIR` 环境变量把运行数据目录迁移到其他分区。
 2. **OpenCode 用量无独立 JSON API**——数据 SSR 内嵌在页面 HTML(`rollingUsage:`/`usage.list`),用正则解析。字段含 `$R[NN]=` 混淆,详见 `internal/providers/opencode.go` 的 `reWindows`/`reRecord`。
 3. 验证 opencode 接口用 `curl.exe`,**不要用** `Invoke-WebRequest`(会 302 跳 OpenAuth 登录页)。
 4. Wails v3 alpha **没有内置通知 API**——toast 走 PowerShell WinRT(`internal/notify/notify_windows.go`),每次告警起一个隐藏 powershell 进程。

@@ -76,7 +76,7 @@ func (p *openCodeGo) fetch(ctx context.Context, path string) ([]byte, error) {
 	}
 	// Tolerate the auth= prefix users copy along from DevTools.
 	req.Header.Set("Cookie", "auth="+strings.TrimPrefix(p.cfg.Cookie, "auth="))
-	req.Header.Set("User-Agent", "AIQuotaGlass/0.1 (+https://github.com/anomalyco/opencode)")
+	req.Header.Set("User-Agent", "AIQuotaGlass/0.1 (+https://github.com/zp96324511/AIQuotaGlass)")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	resp, err := p.client.Do(req)
 	if err != nil {

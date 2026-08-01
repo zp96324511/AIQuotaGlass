@@ -80,7 +80,7 @@ func (p *zhipu) Query(ctx context.Context) (*Result, error) {
 	req.Header.Set("Authorization", strings.TrimSpace(p.cfg.Cookie))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Language", "en-US,en")
-	req.Header.Set("User-Agent", "AIQuotaGlass/0.1 (+https://github.com/anomalyco/opencode)")
+	req.Header.Set("User-Agent", "AIQuotaGlass/0.1 (+https://github.com/zp96324511/AIQuotaGlass)")
 
 	resp, err := p.client.Do(req)
 	if err != nil {

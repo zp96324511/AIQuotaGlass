@@ -193,21 +193,17 @@ scheduler tick
 ## 10. 构建与运行
 
 ```powershell
-# 依赖环境(本机 C: 满,必须指向 D:)
-$env:GOPATH='D:\gocache'; $env:GOMODCACHE='D:\gocache\pkg\mod'
-$env:GOCACHE='D:\gocache\build'; $env:GOTMPDIR='D:\gocache\tmp'
-$env:PATH="D:\gocache\bin;$env:PATH"
-$env:AQUOTA_CONFIG_DIR='D:\aiquotaglass\data'
-
 wails3 build          # 生产: bin\aiquotaglass.exe
 wails3 dev            # 开发热重载
 go vet ./... && go test ./...
 ```
 
+运行数据默认位于 `os.UserConfigDir()/AIQuotaGlass`，可用 `AQUOTA_CONFIG_DIR` 环境变量覆盖（见 AGENTS.md 坑 1）。
+
 `wails3 build` 流程:go mod tidy → generate bindings → vite build → generate icons/syso → `go build -tags production`。默认 CGO_ENABLED=0。
 
 ## 11. 已知限制
-- C: 盘满导致默认路径(AppData)不可写——依赖 `AQUOTA_CONFIG_DIR` 迁移(见 AGENTS.md 坑 1)
+- 默认数据目录(AppData)不可写时应用启动会失败——依赖 `AQUOTA_CONFIG_DIR` 迁移(见 AGENTS.md 坑 1)
 - opencode cookie 为会话凭据,过期需重抓(控制台 DevTools → Network → Copy as cURL)
 - `usage.list` 仅解析首页 ~50 条,非全量历史
 - 告警仅支持窗口维度(5h/周/月),无成本维度

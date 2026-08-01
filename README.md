@@ -1,41 +1,56 @@
 # AIQuotaGlass
 
-多厂商 AI 套餐/API 用量定时刷新与阈值告警的 Windows 桌面悬浮工具。
+多厂商 AI 套餐 / API 用量定时刷新与阈值告警的 Windows 桌面悬浮工具。
 
-透明玻璃拟态、无边框、置顶、贴边吸附,不遮挡桌面工作区。首厂商支持 **OpenCode Go**。
+透明玻璃拟态、无边框、置顶、贴边吸附，不遮挡桌面工作区。
 
 ## 功能
 
-- 定时自动刷新(默认 5 分钟)多个厂商的套餐/API 用量
-- 每个用量窗口(如 OpenCode Go 的 5小时/周/月限额)独立进度条 + 重置倒计时
-- 阈值告警:应用内提示 + Windows 系统通知(边缘触发去重)
-- 使用明细统计:请求数、费用、缓存命中率
-- 悬浮窗:可拖拽、贴边吸附、置顶、透明度调节
-- 配置(厂商/Cookie/阈值/间隔)通过设置面板维护,持久化到本地
+- 定时自动刷新（默认 5 分钟）多个厂商的套餐 / API 用量
+- 每个用量窗口（5小时 / 本周 / 本月限额）独立进度条 + 重置倒计时
+- 阈值告警：应用内提示 + Windows 系统通知（边缘触发去重）
+- 使用明细统计：请求数、费用、缓存命中率
+- 悬浮窗：可拖拽、贴边吸附、置顶、透明度调节
+- 配置（厂商 / 凭据 / 阈值 / 间隔）通过设置面板维护，持久化到本地，凭据 DPAPI 加密存储
+
+## 已支持厂商
+
+| 类型 | 查询方式 |
+|---|---|
+| OpenCode Go | 会话 Cookie + Workspace（SSR 页面解析） |
+| 智谱 GLM | API Key（Coding Plan 用量接口） |
+| Kimi For Coding | API Key |
+| MiniMax | API Key |
+
+扩展新厂商只需在 `internal/providers/` 加一个 Go 文件——见[厂商插件开发指南](docs/PROVIDER_GUIDE.md)。
 
 ## 快速开始
 
-```powershell
-# 环境变量(本机 C: 盘满,缓存与运行数据必须指向 D:)
-$env:GOPATH='D:\gocache'; $env:GOMODCACHE='D:\gocache\pkg\mod'
-$env:GOCACHE='D:\gocache\build'; $env:GOTMPDIR='D:\gocache\tmp'
-$env:PATH="D:\gocache\bin;$env:PATH"
-$env:AQUOTA_CONFIG_DIR='D:\aiquotaglass\data'
+前置要求：Go 1.25+、Node.js、Wails v3 CLI（`go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.119`）。
 
-wails3 build
+```powershell
+wails3 build          # 生产构建: bin\aiquotaglass.exe
 .\bin\aiquotaglass.exe
 ```
 
-点击悬浮窗 ⚙ 配置厂商:
-1. 登录 https://opencode.ai/auth
-2. DevTools → Network → 页面请求 → Copy as cURL,取 `Cookie: auth=...`
-3. 填入 Workspace ID(`wrk_...`)与 cookie,保存即自动刷新
+开发热重载：`wails3 dev`。运行数据（配置 + WebView2 缓存）默认位于 `%USERPROFILE%\.config\AIQuotaGlass`，可用环境变量 `AQUOTA_CONFIG_DIR` 覆盖。
+
+### 配置厂商
+
+点击悬浮窗 ⚙ 打开设置面板，「+ 添加账号」选择厂商类型，按卡片内教程获取并填写凭据（cookie / API Key），保存即自动刷新。
+
+凭据由用户自行从厂商控制台 / DevTools 复制，应用不接触浏览器，不记录、不上传任何使用数据。
 
 ## 技术栈
 
-Go 1.25 + Wails v3 (alpha2.119) + WebView2 + 原生 TypeScript/Vite。
+Go 1.25 + [Wails v3](https://v3.wails.io)（alpha2.119，锁定）+ WebView2 + 原生 TypeScript / Vite，无前端框架依赖。
 
 ## 文档
 
-- [设计文档](docs/DESIGN.md) — 架构、数据流、模块说明、扩展指南
-- [AGENTS.md](AGENTS.md) — 开发环境、命令、约定、已知坑(给 AI 协作的上下文)
+- [设计文档](docs/DESIGN.md) — 架构、数据流、模块说明
+- [厂商插件开发指南](docs/PROVIDER_GUIDE.md) — 如何新增一个厂商
+- [AGENTS.md](AGENTS.md) — 开发者约定与已知坑
+
+## License
+
+[MIT](LICENSE)

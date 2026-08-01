@@ -10,3 +10,6 @@ build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 # Mobile generated (per-machine; overlays hold absolute paths)
 build/android/overlay.json
 build/android/gen/
+# Runtime config with credentials (defensive; config dir is outside the repo by default)
+config.json
+*.local.json

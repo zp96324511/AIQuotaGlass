@@ -65,7 +65,7 @@ func (p *kimi) Query(ctx context.Context) (*Result, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(p.cfg.Cookie))
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "AIQuotaGlass/0.1 (+https://github.com/anomalyco/opencode)")
+	req.Header.Set("User-Agent", "AIQuotaGlass/0.1 (+https://github.com/zp96324511/AIQuotaGlass)")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
