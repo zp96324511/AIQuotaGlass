@@ -39,6 +39,8 @@
 | 智谱 GLM | API Key（Coding Plan 用量接口） |
 | Kimi For Coding | API Key |
 | MiniMax | API Key |
+| New API | API Key（自建中转面板令牌额度） |
+| Sub2API | API Key（自建中转面板配额 / 订阅限额 / 今日·近30天费用） |
 
 扩展新厂商只需在 `internal/providers/` 加一个 Go 文件——见[厂商插件开发指南](docs/PROVIDER_GUIDE.md)。
 

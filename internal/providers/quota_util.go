@@ -6,6 +6,21 @@ import (
 	"time"
 )
 
+// normalizeBaseURL normalizes a user-provided panel address: trims spaces and
+// trailing slashes, and prepends "https://" when no scheme was given. Returns
+// "" for empty input so callers can report a missing address.
+func normalizeBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimRight(raw, "/")
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	return raw
+}
+
 // valueAsFloat reads a JSON number or a numeric string ("100") from an any.
 // JSON numbers unmarshal into float64.
 func valueAsFloat(v any) (float64, bool) {
@@ -59,7 +74,9 @@ func resetInSec(v any, now time.Time) (int64, bool) {
 
 // windowFromLimitRemaining builds a WindowStatus from a (limit, remaining)
 // quota pair, converting to used percent. limit <= 0 means the window is not
-// applicable and is skipped.
+// applicable and is skipped. When no reset time is available the window is
+// marked with ResetInSec = -1 so the UI hides the countdown instead of
+// claiming the quota resets soon (e.g. quotas that only reset manually).
 func windowFromLimitRemaining(limitV, remainV, resetV any, key, label string, now time.Time) (WindowStatus, bool) {
 	limit, ok := valueAsFloat(limitV)
 	if !ok || limit <= 0 {
@@ -77,7 +94,7 @@ func windowFromLimitRemaining(limitV, remainV, resetV any, key, label string, no
 	if percent > 100 {
 		percent = 100
 	}
-	w := WindowStatus{Key: key, Label: label, Percent: percent, Status: "ok"}
+	w := WindowStatus{Key: key, Label: label, Percent: percent, Status: "ok", ResetInSec: -1}
 	if sec, ok := resetInSec(resetV, now); ok {
 		w.ResetInSec = sec
 	}

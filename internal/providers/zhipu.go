@@ -164,10 +164,11 @@ func parseZhipuQuota(body []byte, now time.Time) ([]WindowStatus, error) {
 			percent = 100
 		}
 		w := WindowStatus{
-			Key:     key,
-			Label:   label,
-			Percent: percent,
-			Status:  "ok",
+			Key:        key,
+			Label:      label,
+			Percent:    percent,
+			Status:     "ok",
+			ResetInSec: -1,
 		}
 		if l.NextResetTime > 0 {
 			sec := (l.NextResetTime - now.UnixMilli()) / 1000

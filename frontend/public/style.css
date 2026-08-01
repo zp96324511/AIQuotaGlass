@@ -153,6 +153,7 @@ html, body {
 .fill.bar-danger { background: linear-gradient(90deg, #ff6b6b, #ff4d4d); }
 
 .prov-detail { color: var(--text-dim); font-size: 10.5px; margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--border); }
+.prov-detail + .prov-detail { margin-top: 2px; padding-top: 0; border-top: none; }
 
 /* ---- Edge-docked slim bar: three quota bars in one line ---- */
 .snap-bar {

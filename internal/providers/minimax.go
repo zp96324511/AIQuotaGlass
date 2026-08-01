@@ -173,7 +173,7 @@ func parseMiniMaxQuota(body []byte, now time.Time) ([]WindowStatus, error) {
 	}
 
 	if pct, ok := valueAsFloat(general.CurrentIntervalRemainingPct); ok {
-		w := WindowStatus{Key: "5h", Label: "5小时", Percent: remainToUsed(pct), Status: "ok"}
+		w := WindowStatus{Key: "5h", Label: "5小时", Percent: remainToUsed(pct), Status: "ok", ResetInSec: -1}
 		if sec, ok := resetInSec(general.EndTime, now); ok {
 			w.ResetInSec = sec
 		}
@@ -181,7 +181,7 @@ func parseMiniMaxQuota(body []byte, now time.Time) ([]WindowStatus, error) {
 	}
 	if status, ok := valueAsFloat(general.CurrentWeeklyStatus); ok && status == 1 {
 		if pct, ok := valueAsFloat(general.CurrentWeeklyRemainingPct); ok {
-			w := WindowStatus{Key: "weekly", Label: "本周", Percent: remainToUsed(pct), Status: "ok"}
+			w := WindowStatus{Key: "weekly", Label: "本周", Percent: remainToUsed(pct), Status: "ok", ResetInSec: -1}
 			if sec, ok := resetInSec(general.WeeklyEndTime, now); ok {
 				w.ResetInSec = sec
 			}

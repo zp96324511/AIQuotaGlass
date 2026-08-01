@@ -13,8 +13,8 @@ import (
 type WindowStatus struct {
 	Key        string  `json:"key"`        // "5h", "weekly", "monthly"
 	Label      string  `json:"label"`      // human readable label
-	Percent    float64 `json:"percent"`    // 0..100 usage of the limit
-	ResetInSec int64   `json:"resetInSec"` // seconds until the window resets
+	Percent    float64 `json:"percent"`    // 0..100 usage of the limit; -1 = unlimited (UI shows 无限)
+	ResetInSec int64   `json:"resetInSec"` // seconds until the window resets; -1 = no auto reset (countdown hidden)
 	Status     string  `json:"status"`     // "ok" or error marker
 }
 
@@ -23,6 +23,20 @@ type UsageDetail struct {
 	Requests int     `json:"requests"`
 	Cost     float64 `json:"cost"`     // USD
 	CacheHit float64 `json:"cacheHit"` // percent of input tokens served from cache
+	// TodayCost/PeriodCost are spend figures for relay panels that report
+	// them (Sub2API: today's cost and the rolling ~30d cost). When set, the
+	// widget renders them instead of the generic Cost line.
+	TodayCost  float64 `json:"todayCost,omitempty"`  // USD spent today
+	PeriodCost float64 `json:"periodCost,omitempty"` // USD spent over the recent period (~30d)
+	// GroupName/RateMultiplier/PeakActive describe the billing group of a
+	// relay-panel key (Sub2API). RateMultiplier is the effective multiplier
+	// including the peak-rate window when one is active.
+	GroupName      string  `json:"groupName,omitempty"`      // group/plan name
+	RateMultiplier float64 `json:"rateMultiplier,omitempty"` // effective billing multiplier (incl. peak)
+	PeakActive     bool    `json:"peakActive,omitempty"`     // peak-rate window is currently active
+	// ExpiresAt/ExpiresInSec carry the key/subscription expiry.
+	ExpiresAt    string `json:"expiresAt,omitempty"`  // "2006-01-02"; empty = never expires
+	ExpiresInSec int64  `json:"expiresInSec,omitempty"` // seconds until expiry (>0)
 }
 
 // Result is the outcome of a single provider query.

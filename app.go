@@ -82,31 +82,74 @@ func (s *AppService) setup(app *application.App, win windowControl) {
 	go s.edgeDockLoop()
 }
 
+// refresh queries every enabled provider in parallel. It first announces the
+// accounts being refreshed (usage:loading) so the UI can reserve panels, then
+// each provider emits its own incremental usage:update event as soon as it
+// finishes (panels render independently instead of waiting for the slowest
+// account). The call itself blocks until all providers finish so synchronous
+// callers such as RefreshAll always return a complete snapshot.
 func (s *AppService) refresh(ctx context.Context) {
-	results := make([]providers.Result, 0, len(s.cfg.Providers))
+	ids := make([]string, 0, len(s.cfg.Providers))
 	for i := range s.cfg.Providers {
 		pc := s.cfg.Providers[i]
 		if !pc.Enabled {
 			continue
 		}
-		p, err := providers.New(pc)
-		if err != nil {
-			continue
-		}
-		res, err := p.Query(ctx)
-		if err != nil {
-			log.Printf("query %s: %v", pc.ID, err)
-		}
-		if res != nil {
-			results = append(results, *res)
-			s.checkAlerts(res)
-		}
+		ids = append(ids, pc.ID)
+	}
+	if len(ids) > 0 {
+		s.app.Event.Emit("usage:loading", ids)
 	}
 
-	s.mu.Lock()
-	s.lastStatus = results
-	s.mu.Unlock()
-	s.app.Event.Emit("usage:update", results)
+	var wg sync.WaitGroup
+	for i := range s.cfg.Providers {
+		pc := s.cfg.Providers[i]
+		if !pc.Enabled {
+			continue
+		}
+		wg.Add(1)
+		go func(pc config.ProviderConfig) {
+			defer wg.Done()
+			p, err := providers.New(pc)
+			if err != nil {
+				return
+			}
+			res, err := p.Query(ctx)
+			if err != nil {
+				log.Printf("query %s: %v", pc.ID, err)
+				// Report the failure like a result so its panel (or the reserved
+				// loading slot) is replaced with a visible error instead of
+				// showing stale data or spinning forever.
+				res = &providers.Result{
+					ProviderID:   pc.ID,
+					ProviderName: p.Name(),
+					Error:        err.Error(),
+					UpdatedAt:    time.Now().Format("15:04:05"),
+				}
+			}
+			if res == nil {
+				return
+			}
+			s.checkAlerts(res)
+
+			s.mu.Lock()
+			s.lastStatus = upsertResult(s.lastStatus, *res)
+			s.mu.Unlock()
+			s.app.Event.Emit("usage:update", []providers.Result{*res})
+		}(pc)
+	}
+	wg.Wait()
+}
+
+// upsertResult replaces the entry for r.ProviderID or appends it.
+func upsertResult(list []providers.Result, r providers.Result) []providers.Result {
+	for i := range list {
+		if list[i].ProviderID == r.ProviderID {
+			list[i] = r
+			return list
+		}
+	}
+	return append(list, r)
 }
 
 func (s *AppService) checkAlerts(res *providers.Result) {
@@ -123,8 +166,11 @@ func (s *AppService) checkAlerts(res *providers.Result) {
 		}
 		key := res.ProviderID + "/" + w.Key
 		above := w.Percent >= float64(threshold)
-		if above && !s.alertArmed[key] {
-			s.alertArmed[key] = true
+		s.mu.Lock()
+		armed := s.alertArmed[key]
+		s.alertArmed[key] = above
+		s.mu.Unlock()
+		if above && !armed {
 			msg := alertMessage(p.Name, w, threshold)
 			s.app.Event.Emit("usage:alert", map[string]any{
 				"provider": p.Name, "window": w.Label, "percent": w.Percent, "threshold": threshold,
@@ -132,8 +178,6 @@ func (s *AppService) checkAlerts(res *providers.Result) {
 			if cfg.NativeNotify {
 				notify.Show("AIQuotaGlass 用量告警", msg)
 			}
-		} else if !above {
-			s.alertArmed[key] = false
 		}
 	}
 }

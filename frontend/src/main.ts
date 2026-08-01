@@ -15,6 +15,13 @@ interface UsageDetail {
     requests: number;
     cost: number;
     cacheHit: number;
+    todayCost?: number;
+    periodCost?: number;
+    groupName?: string;
+    rateMultiplier?: number;
+    peakActive?: boolean;
+    expiresAt?: string;
+    expiresInSec?: number;
 }
 interface ProviderResult {
     providerId: string;
@@ -87,6 +94,7 @@ function fmtReset(sec: number): string {
 }
 
 function fmtPercent(p: number): string {
+    if (p < 0) return "无限";
     return `${(Math.round(p * 10) / 10).toFixed(1)}%`;
 }
 
@@ -126,44 +134,137 @@ function applyOpacity() {
 // ---------------------------------------------------------------------------
 // Main widget rendering
 // ---------------------------------------------------------------------------
+function cardHTML(r: ProviderResult): string {
+    const err = r.error
+        ? `<div class="prov-error">${escapeHtml(r.error)}</div>`
+        : "";
+    const bars = (r.windows || []).map(w => {
+        const th = currentConfig?.providers.find(p => p.id === r.providerId)?.alertThresholds?.[w.key] ?? 80;
+        const sub = w.resetInSec >= 0 ? `<div class="row-sub">${fmtReset(w.resetInSec)}</div>` : "";
+        return `
+        <div class="row">
+            <span class="row-label">${w.label}</span>
+            <div class="track"><div class="fill ${barClass(w.percent, th)}" style="width:${Math.min(100, w.percent)}%"></div></div>
+            <span class="row-val">${fmtPercent(w.percent)}</span>
+        </div>
+        ${sub}`;
+    }).join("");
+
+    const d = r.detail;
+    const detail = d && (d.requests > 0 || (d.todayCost ?? 0) > 0 || (d.periodCost ?? 0) > 0)
+        ? (() => {
+            const parts: string[] = [];
+            if (d.todayCost) parts.push(`今日 $${d.todayCost.toFixed(1)}`);
+            if (d.periodCost) parts.push(`近30天 $${d.periodCost.toFixed(1)}`);
+            // Relay panels report spend figures instead of a request count;
+            // classic providers keep the generic cost/requests line.
+            if (!(d.todayCost || d.periodCost)) {
+                if (d.requests) parts.push(`${d.requests} 次请求`);
+                if (d.cost) parts.push(`费用 $${d.cost.toFixed(4)}`);
+            }
+            if (d.cacheHit) parts.push(`缓存命中 ${d.cacheHit.toFixed(1)}%`);
+            if ((d.rateMultiplier ?? 0) > 0) {
+                parts.push(`倍率 x${parseFloat((d.rateMultiplier!).toFixed(2))}${d.peakActive ? " (峰值)" : ""}`);
+            }
+            return `<div class="prov-detail">${parts.join(" · ")}</div>`;
+        })()
+        : "";
+    const meta = d && (d.groupName || d.expiresAt)
+        ? (() => {
+            const m: string[] = [];
+            if (d.groupName) m.push(`分组 ${d.groupName}`);
+            if (d.expiresAt) {
+                const days = d.expiresInSec && d.expiresInSec > 0 ? Math.ceil(d.expiresInSec / 86400) : 0;
+                m.push(`有效期至 ${d.expiresAt}${days ? ` (剩${days}天)` : ""}`);
+            }
+            return `<div class="prov-detail">${m.join(" · ")}</div>`;
+        })()
+        : "";
+
+    const dot = r.error ? "dot-error" : "dot-ok";
+    return `
+    <div class="card" data-provider-id="${escapeHtml(r.providerId)}">
+        <div class="card-head">
+            <span class="dot ${dot}"></span>
+            <span class="card-name">${escapeHtml(r.providerName)}</span>
+            <span class="card-time">${r.updatedAt}</span>
+        </div>
+        ${err}
+        ${bars}
+        ${detail}
+        ${meta}
+    </div>`;
+}
+
+function cssEsc(s: string): string {
+    return s.replace(/["\\]/g, "\\$&");
+}
+
+// orderOf returns the config position of a provider (SortOrder is applied when
+// the config is saved), so panels stay in user-defined order regardless of the
+// order in which their queries complete.
+function orderOf(id: string): number {
+    const idx = currentConfig?.providers.findIndex(p => p.id === id) ?? -1;
+    return idx < 0 ? Number.MAX_SAFE_INTEGER : idx;
+}
+
+function sortResults(list: ProviderResult[]): ProviderResult[] {
+    return [...list].sort((a, b) => orderOf(a.providerId) - orderOf(b.providerId));
+}
+
 function render() {
     const list = $<HTMLDivElement>("providerList");
-    if (!results.length) {
+    if (!list) return; // settings popup has no provider list
+    const hasAccounts = (currentConfig?.providers ?? []).some(p => p.enabled);
+    if (!hasAccounts) {
         list.innerHTML = `<div class="empty-hint">尚未配置厂商, 点击 ⚙ 开始</div>`;
         return;
     }
-    list.innerHTML = results.map(r => {
-        const err = r.error
-            ? `<div class="prov-error">${escapeHtml(r.error)}</div>`
-            : "";
-        const bars = (r.windows || []).map(w => {
-            const th = currentConfig?.providers.find(p => p.id === r.providerId)?.alertThresholds?.[w.key] ?? 80;
-            return `
-            <div class="row">
-                <span class="row-label">${w.label}</span>
-                <div class="track"><div class="fill ${barClass(w.percent, th)}" style="width:${Math.min(100, w.percent)}%"></div></div>
-                <span class="row-val">${fmtPercent(w.percent)}</span>
-            </div>
-            <div class="row-sub">${fmtReset(w.resetInSec)}</div>`;
-        }).join("");
+    list.innerHTML = sortResults(results).map(cardHTML).join("");
+}
 
-        const detail = r.detail && r.detail.requests > 0
-            ? `<div class="prov-detail">${r.detail.requests} 次请求 · 费用 $${r.detail.cost.toFixed(4)} · 缓存命中 ${r.detail.cacheHit.toFixed(1)}%</div>`
-            : "";
+// insertCardAt places a card at its provider's config position, keeping the
+// panel order stable while accounts finish at different times.
+function insertCardAt(html: string, id: string) {
+    const list = $<HTMLDivElement>("providerList");
+    const pos = orderOf(id);
+    if (pos < Number.MAX_SAFE_INTEGER) {
+        const cards = Array.from(list.querySelectorAll<HTMLElement>(".card[data-provider-id]"));
+        for (const c of cards) {
+            if (orderOf(c.dataset.providerId ?? "") > pos) {
+                c.insertAdjacentHTML("beforebegin", html);
+                return;
+            }
+        }
+    }
+    list.insertAdjacentHTML("beforeend", html);
+}
 
-        const dot = r.error ? "dot-error" : "dot-ok";
-        return `
-        <div class="card">
-            <div class="card-head">
-                <span class="dot ${dot}"></span>
-                <span class="card-name">${escapeHtml(r.providerName)}</span>
-                <span class="card-time">${r.updatedAt}</span>
-            </div>
-            ${err}
-            ${bars}
-            ${detail}
-        </div>`;
-    }).join("");
+// loadingCardHTML reserves a panel slot while an account is being queried.
+function loadingCardHTML(id: string): string {
+    const name = currentConfig?.providers.find(p => p.id === id)?.name ?? id;
+    return `
+    <div class="card card-loading" data-provider-id="${escapeHtml(id)}">
+        <div class="card-head">
+            <span class="dot dot-ok"></span>
+            <span class="card-name">${escapeHtml(name)}</span>
+            <span class="card-time">加载中...</span>
+        </div>
+    </div>`;
+}
+
+// upsertProvider replaces the panel of one provider in place (per-account
+// incremental rendering) instead of rebuilding every card.
+function upsertProvider(r: ProviderResult) {
+    const idx = results.findIndex(x => x.providerId === r.providerId);
+    if (idx >= 0) results[idx] = r; else results.push(r);
+
+    const existing = $<HTMLDivElement>("providerList").querySelector(`[data-provider-id="${cssEsc(r.providerId)}"]`);
+    if (existing) {
+        existing.outerHTML = cardHTML(r);
+        return;
+    }
+    insertCardAt(cardHTML(r), r.providerId);
 }
 
 function escapeHtml(s: string): string {
@@ -301,6 +402,7 @@ function renderSettings() {
                     <label>5h阈值 <input type="number" id="th5_${i}" min="0" max="100" value="${p.alertThresholds["5h"] ?? 80}"/></label>
                     <label>周阈值 <input type="number" id="thw_${i}" min="0" max="100" value="${p.alertThresholds["weekly"] ?? 80}"/></label>
                     <label>月阈值 <input type="number" id="thm_${i}" min="0" max="100" value="${p.alertThresholds["monthly"] ?? 80}"/></label>
+                    <label>总额度阈值 <input type="number" id="tht_${i}" min="0" max="100" value="${p.alertThresholds["total"] ?? 80}"/></label>
                 </div>
                 <div class="prov-actions">
                     <button type="button" class="del-btn" data-del="${i}">删除此账号</button>
@@ -351,7 +453,9 @@ function renderSettings() {
 // not lost when the form re-renders (e.g. after add/remove/type change).
 function readProviderFromDom(i: number): ProviderConfig {
     const type = $<HTMLSelectElement>(`type_${i}`)?.value || "opencode-go";
-    const p: ProviderConfig = {
+        const sortEl = $<HTMLInputElement>(`sort_${i}`);
+        const sortRaw = sortEl?.value.trim() ?? "";
+        const p: ProviderConfig = {
         id: $<HTMLInputElement>(`id_${i}`).value || `prov_${i}`,
         type,
         name: $<HTMLInputElement>(`name_${i}`).value || "未命名厂商",
@@ -360,9 +464,10 @@ function readProviderFromDom(i: number): ProviderConfig {
             "5h": clampInt($<HTMLInputElement>(`th5_${i}`).value, 0, 100),
             weekly: clampInt($<HTMLInputElement>(`thw_${i}`).value, 0, 100),
             monthly: clampInt($<HTMLInputElement>(`thm_${i}`).value, 0, 100),
+            total: clampInt($<HTMLInputElement>(`tht_${i}`)?.value ?? "", 0, 100),
         },
         detail: {},
-        sortOrder: clampInt($<HTMLInputElement>(`sort_${i}`)?.value ?? "", 0, 9999) || i,
+        sortOrder: sortRaw === "" ? i : clampInt(sortRaw, 0, 9999),
     };
     fieldsFor(type).forEach(f => {
         if (!isValueField(f)) return;
@@ -415,7 +520,7 @@ function addProvider() {
         enabled: true,
         workspace: "",
         cookie: "",
-        alertThresholds: { "5h": 80, weekly: 80, monthly: 80 },
+        alertThresholds: { "5h": 80, weekly: 80, monthly: 80, total: 80 },
         detail: {},
         sortOrder: draft.providers.length,
     });
@@ -521,7 +626,7 @@ function initWidget() {
     render();
 
     $<HTMLButtonElement>("btnRefresh").addEventListener("click", () => {
-        AppService.RefreshAll().then(res => { results = res; render(); }).catch(e => toast("刷新失败: " + e));
+        AppService.RefreshAll().then(res => { results = sortResults(res); render(); }).catch(e => toast("刷新失败: " + e));
     });
     $<HTMLButtonElement>("btnSettings").addEventListener("click", () => AppService.OpenSettings());
     $<HTMLButtonElement>("btnClose").addEventListener("click", () => AppService.HideToTray());
@@ -532,9 +637,17 @@ function initWidget() {
     // Click on the docked bar -> expand back to the full widget
     $<HTMLDivElement>("snapBar").addEventListener("click", () => AppService.ExpandWidget());
 
+    Events.On("usage:loading", (e: any) => {
+        const ids = e.data as string[];
+        for (const id of ids) {
+            if (results.some(x => x.providerId === id)) continue;
+            if ($<HTMLDivElement>("providerList").querySelector(`[data-provider-id="${cssEsc(id)}"]`)) continue;
+            insertCardAt(loadingCardHTML(id), id);
+        }
+    });
     Events.On("usage:update", (e: any) => {
-        results = e.data as ProviderResult[];
-        render();
+        const list = e.data as ProviderResult[];
+        for (const r of list) upsertProvider(r);
         updateSnapBar();
     });
     Events.On("widget:snap", (e: any) => {
@@ -561,13 +674,17 @@ async function init() {
     } else {
         initWidget();
         const res = await AppService.RefreshAll();
-        results = res;
+        results = sortResults(res);
         render();
     }
 
     Events.On("config:saved", (e: any) => {
         currentConfig = e.data as AppConfig;
         applyOpacity();
+        // Rebuild panels so SortOrder changes take effect immediately instead
+        // of waiting for the next app start.
+        render();
+        updateSnapBar();
     });
 }
 
