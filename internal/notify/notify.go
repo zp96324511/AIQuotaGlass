@@ -13,11 +13,16 @@ type Notifier interface {
 
 var impl Notifier = newWindowsNotifier()
 
-// Show dispatches a native notification.
-func Show(title, message string) {
+// ShowE dispatches a native notification and returns any error.
+func ShowE(title, message string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := impl.Show(ctx, title, message); err != nil {
+	return impl.Show(ctx, title, message)
+}
+
+// Show dispatches a native notification, logging any error (fire-and-forget).
+func Show(title, message string) {
+	if err := ShowE(title, message); err != nil {
 		log.Printf("notify: %v", err)
 	}
 }

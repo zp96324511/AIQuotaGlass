@@ -362,11 +362,10 @@ func (s *AppService) Quit() {
 }
 
 // TestNotify fires a sample notification (settings preview).
-func (s *AppService) TestNotify() {
-	cfg := config.Get()
-	if cfg != nil && cfg.NativeNotify {
-		notify.Show("AIQuotaGlass", "告警通知测试")
-	}
+// It always fires regardless of the NativeNotify toggle so users can verify
+// the notification channel works before enabling automatic alerts.
+func (s *AppService) TestNotify() error {
+	return notify.ShowE("AIQuotaGlass", "告警通知测试")
 }
 
 func formatPercent(f float64) string {

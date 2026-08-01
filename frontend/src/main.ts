@@ -491,7 +491,18 @@ async function initSettings() {
     $<HTMLButtonElement>("btnSettingsClose").addEventListener("click", () => AppService.CloseSettings());
     $<HTMLButtonElement>("btnCancel").addEventListener("click", () => AppService.CloseSettings());
     $<HTMLButtonElement>("btnAddProvider").addEventListener("click", addProvider);
-    $<HTMLButtonElement>("btnTestNotify").addEventListener("click", () => AppService.TestNotify());
+    $<HTMLButtonElement>("btnTestNotify").addEventListener("click", async () => {
+        const btn = $<HTMLButtonElement>("btnTestNotify");
+        btn.disabled = true;
+        try {
+            await AppService.TestNotify();
+            toast("测试通知已发送");
+        } catch (e) {
+            toast("测试通知失败: " + e);
+        } finally {
+            btn.disabled = false;
+        }
+    });
     $<HTMLButtonElement>("btnSave").addEventListener("click", async () => {
         const cfg = collectConfig();
         if (!cfg) return;
