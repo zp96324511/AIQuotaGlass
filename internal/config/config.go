@@ -26,6 +26,7 @@ type ProviderConfig struct {
 // ProviderDetailCfg holds provider specific knobs.
 type ProviderDetailCfg struct {
 	ShowUsageDetail bool `json:"showUsageDetail,omitempty"` // fetch usage history page too
+	International   bool `json:"international,omitempty"`   // use the international host (z.ai) instead of bigmodel.cn
 }
 
 // AppConfig is the persisted application configuration.

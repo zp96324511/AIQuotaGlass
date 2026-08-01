@@ -32,7 +32,7 @@ interface ProviderConfig {
     workspace?: string;
     cookie?: string;
     alertThresholds: Record<string, number>;
-    detail?: { showUsageDetail?: boolean };
+    detail?: { showUsageDetail?: boolean; international?: boolean };
     sortOrder?: number;
 }
 interface AppConfig {
@@ -246,6 +246,7 @@ function getFieldValue(p: ProviderConfig, key: string): string {
         case "workspace": return p.workspace ?? "";
         case "cookie": return p.cookie ?? "";
         case "detail.showUsageDetail": return p.detail?.showUsageDetail ? "1" : "0";
+        case "detail.international": return p.detail?.international ? "1" : "0";
         default: return "";
     }
 }
@@ -253,7 +254,8 @@ function setFieldValue(p: ProviderConfig, key: string, raw: string) {
     switch (key) {
         case "workspace": p.workspace = raw; break;
         case "cookie": p.cookie = raw; break;
-        case "detail.showUsageDetail": p.detail = { showUsageDetail: raw === "1" }; break;
+        case "detail.showUsageDetail": p.detail = { ...p.detail, showUsageDetail: raw === "1" }; break;
+        case "detail.international": p.detail = { ...p.detail, international: raw === "1" }; break;
     }
 }
 
