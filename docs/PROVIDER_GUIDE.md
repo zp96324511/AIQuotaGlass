@@ -18,7 +18,7 @@ internal/providers/
 
 - **`Provider` 接口**：一个厂商 = 一个实现该接口的类型，职责是「根据持久化配置，查询该账号的用量窗口」。
 - **`Register()`**：各厂商文件 `init()` 中自注册，把 `typeKey` → 工厂函数 + UI schema 写入注册表。
-- **`RegisterWindows()`**：声明该厂商实际发出的用量窗口键（`5h`/`weekly`/`monthly`/`total`），设置面板据此只渲染**适用**的阈值输入。
+- **`RegisterWindows()`**：声明该厂商实际发出的用量窗口键（`5h`/`weekly`/`monthly`/`total`/`balance`），设置面板据此只渲染**适用**的阈值输入。
 - **`ProviderField`**：声明该厂商在设置面板的动态参数表单（API Key、workspace、教程等）。
 - **前端零改动**：设置面板按注册的 `Fields` 动态渲染表单；主窗口按 `Result.Windows` 渲染进度条。
 
@@ -222,8 +222,17 @@ func init() {
 | `opencode-go` | `5h` / `weekly` / `monthly` | 3 |
 | `zhipu` / `kimi` / `minimax` | `5h` / `weekly` | 2 |
 | `new-api` / `sub2api` | `total` | 1 |
+| `deepseek` / `openrouter` | `balance` | 1 |
 
 未声明 `RegisterWindows` 的厂商：设置面板不显示阈值输入，告警循环跳过全部窗口（用于无额度概念的厂商或尚未适配的实验类型）。
+
+### 余额窗口（`balance`）
+
+按量付费厂商（DeepSeek / OpenRouter 等）没有配额/重置窗口，只有账户余额。这类厂商：
+
+- `Query()` 返回单个 `Key: "balance"` 的窗口，用 `balanceWindow(remaining, unit, label)` 构造（`internal/providers/quota_util.go`）——进度按 **100 单位参考线**换算：余额 ≥100 进度为 0（满血）、余额 0 进度为 100（耗尽）、中间线性。
+- `Used` 存真实余额，`Total` 恒为 0，`Unit` 存币种（`CNY`/`USD`）；前端悬停进度条显示 `余额 ¥88.5`（CNY 用 ¥，其他用 $）。
+- 阈值语义沿用统一 percent（80 默认 = 余额低于 20 元/美元时告警）。
 
 ## 5. 多账号
 
