@@ -14,6 +14,8 @@ type WindowStatus struct {
 	Key        string  `json:"key"`        // "5h", "weekly", "monthly"
 	Label      string  `json:"label"`      // human readable label
 	Percent    float64 `json:"percent"`    // 0..100 usage of the limit; -1 = unlimited (UI shows 无限)
+	Used       float64 `json:"used"`       // raw consumed quota; Total=0 means unavailable
+	Total      float64 `json:"total"`      // raw quota limit; 0 means unavailable
 	ResetInSec int64   `json:"resetInSec"` // seconds until the window resets; -1 = no auto reset (countdown hidden)
 	Status     string  `json:"status"`     // "ok" or error marker
 }
@@ -35,7 +37,7 @@ type UsageDetail struct {
 	RateMultiplier float64 `json:"rateMultiplier,omitempty"` // effective billing multiplier (incl. peak)
 	PeakActive     bool    `json:"peakActive,omitempty"`     // peak-rate window is currently active
 	// ExpiresAt/ExpiresInSec carry the key/subscription expiry.
-	ExpiresAt    string `json:"expiresAt,omitempty"`  // "2006-01-02"; empty = never expires
+	ExpiresAt    string `json:"expiresAt,omitempty"`    // "2006-01-02"; empty = never expires
 	ExpiresInSec int64  `json:"expiresInSec,omitempty"` // seconds until expiry (>0)
 }
 

@@ -8,6 +8,8 @@ interface WindowStatus {
     key: string;
     label: string;
     percent: number;
+    used: number;
+    total: number;
     resetInSec: number;
     status: string;
 }
@@ -98,6 +100,15 @@ function fmtPercent(p: number): string {
     return `${(Math.round(p * 10) / 10).toFixed(1)}%`;
 }
 
+function fmtQuota(v: number): string {
+    return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 4 }).format(v);
+}
+
+function quotaTitle(w: WindowStatus): string {
+    if (w.total <= 0) return "";
+    return `${w.label}: 已用 ${fmtQuota(w.used)} / 总量 ${fmtQuota(w.total)}`;
+}
+
 function barClass(p: number, threshold: number): string {
     if (threshold > 0 && p >= threshold) return "bar-danger";
     if (p >= 80) return "bar-danger";
@@ -141,10 +152,12 @@ function cardHTML(r: ProviderResult): string {
     const bars = (r.windows || []).map(w => {
         const th = currentConfig?.providers.find(p => p.id === r.providerId)?.alertThresholds?.[w.key] ?? 80;
         const sub = w.resetInSec >= 0 ? `<div class="row-sub">${fmtReset(w.resetInSec)}</div>` : "";
+        const title = quotaTitle(w);
+        const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
         return `
         <div class="row">
             <span class="row-label">${w.label}</span>
-            <div class="track"><div class="fill ${barClass(w.percent, th)}" style="width:${Math.min(100, w.percent)}%"></div></div>
+            <div class="track"${titleAttr}><div class="fill ${barClass(w.percent, th)}" style="width:${Math.min(100, w.percent)}%"></div></div>
             <span class="row-val">${fmtPercent(w.percent)}</span>
         </div>
         ${sub}`;
@@ -307,7 +320,10 @@ function updateSnapBar() {
         const percent = $<HTMLSpanElement>(`snapPct_${key}`);
         if (percent) percent.textContent = Math.round(pct) + "%";
         fill.classList.toggle("bar-danger", !!w && th > 0 && w.percent >= th);
-        fill.title = w ? `${SNAP_LABELS[key] ?? key} ${fmtPercent(w.percent)}` : (res?.error || "暂无数据");
+        const track = fill.parentElement;
+        if (track instanceof HTMLElement) {
+            track.title = w ? quotaTitle(w) || `${w.label} ${fmtPercent(w.percent)}` : (res?.error || "暂无数据");
+        }
     }
 }
 

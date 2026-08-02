@@ -94,7 +94,10 @@ func windowFromLimitRemaining(limitV, remainV, resetV any, key, label string, no
 	if percent > 100 {
 		percent = 100
 	}
-	w := WindowStatus{Key: key, Label: label, Percent: percent, Status: "ok", ResetInSec: -1}
+	w := WindowStatus{
+		Key: key, Label: label, Percent: percent, Used: used, Total: limit,
+		Status: "ok", ResetInSec: -1,
+	}
 	if sec, ok := resetInSec(resetV, now); ok {
 		w.ResetInSec = sec
 	}
