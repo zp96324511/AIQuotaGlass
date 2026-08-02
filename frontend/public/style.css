@@ -180,6 +180,7 @@ body[data-snap="bottom"] .snap-bar {
 }
 
 .snap-seg { flex: 1; min-width: 6px; min-height: 6px; display: flex; }
+.snap-seg.hidden { display: none; }
 
 .snap-track {
     position: relative;

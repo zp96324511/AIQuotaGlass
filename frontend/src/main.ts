@@ -290,25 +290,48 @@ function escapeHtml(s: string): string {
 // Edge-docked bar (slim mode)
 // ---------------------------------------------------------------------------
 const SNAP_KEYS = ["5h", "weekly", "monthly"] as const;
-const SNAP_LABELS: Record<string, string> = { "5h": "5小时", weekly: "本周", monthly: "本月" };
+type SnapKey = (typeof SNAP_KEYS)[number];
 
 function snappedDir(): string {
     return document.body.dataset.snap ?? "";
 }
 
-// updateSnapBar fills the three slim progress bars (5h / weekly / monthly) of
-// the snap provider. The active axis depends on the dock direction.
+// snapSlotWindows maps provider windows to the three reusable DOM slots. Relay
+// panels use one primary quota slot; other providers use their returned windows.
+function snapSlotWindows(res: ProviderResult | undefined): Map<SnapKey, WindowStatus> {
+    const slots = new Map<SnapKey, WindowStatus>();
+    const windows = res?.windows ?? [];
+    const providerType = currentConfig?.providers.find(p => p.id === res?.providerId)?.type;
+    if (providerType === "sub2api" || providerType === "new-api" || windows.some(w => w.key === "total")) {
+        const primary = windows.find(w => w.key === "total") ?? windows[0];
+        if (primary) slots.set("5h", primary);
+        return slots;
+    }
+    for (const key of SNAP_KEYS) {
+        const window = windows.find(w => w.key === key);
+        if (window) slots.set(key, window);
+    }
+    return slots;
+}
+
+// updateSnapBar fills the available quota slots of the snap provider. The
+// active axis depends on the dock direction.
 function updateSnapBar() {
     const dir = snappedDir();
     if (!dir) return;
     const res = results.find(r => r.providerId === snapProvider && !r.error)
         ?? results.find(r => !r.error);
     const cfg = currentConfig;
+    const slotWindows = snapSlotWindows(res);
+    const visibleKeys = slotWindows.size > 0 ? new Set(slotWindows.keys()) : new Set<SnapKey>(["5h"]);
     for (const key of SNAP_KEYS) {
+        const segment = $<HTMLDivElement>(`seg_${key}`);
         const fill = $<HTMLDivElement>(`snapFill_${key}`);
-        if (!fill) continue;
-        const w = res?.windows?.find(x => x.key === key);
-        const th = cfg?.providers.find(p => p.id === res?.providerId)?.alertThresholds?.[key] ?? 80;
+        if (!segment || !fill) continue;
+        const w = slotWindows.get(key);
+        segment.classList.toggle("hidden", !visibleKeys.has(key));
+        const thresholdKey = w?.key ?? key;
+        const th = cfg?.providers.find(p => p.id === res?.providerId)?.alertThresholds?.[thresholdKey] ?? 80;
         const pct = w ? Math.min(100, Math.max(0, w.percent)) : 0;
         if (dir === "left" || dir === "right") {
             fill.style.width = "100%";
