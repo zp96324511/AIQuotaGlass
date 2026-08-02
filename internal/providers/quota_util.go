@@ -103,3 +103,22 @@ func windowFromLimitRemaining(limitV, remainV, resetV any, key, label string, no
 	}
 	return w, true
 }
+
+// balanceWindow builds a single "余额" quota window from a remaining prepaid
+// balance (DeepSeek / OpenRouter style accounts). Percent maps the balance
+// against a 100-unit reference: >=100 remaining is 0% consumed (full), 0 is
+// 100% consumed (depleted), linear in between. Total stays 0 (no real quota
+// limit) and the currency is carried in Unit for the UI tooltip.
+func balanceWindow(remaining float64, unit, label string) WindowStatus {
+	pct := 100 - remaining
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	return WindowStatus{
+		Key: "balance", Label: label, Percent: pct, Used: remaining,
+		Total: 0, ResetInSec: -1, Status: "ok", Unit: unit,
+	}
+}

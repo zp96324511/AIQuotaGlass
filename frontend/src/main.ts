@@ -12,6 +12,7 @@ interface WindowStatus {
     total: number;
     resetInSec: number;
     status: string;
+    unit?: string;
 }
 interface UsageDetail {
     requests: number;
@@ -105,7 +106,14 @@ function fmtQuota(v: number): string {
     return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 4 }).format(v);
 }
 
+// fmtBalance renders a remaining balance with its currency (¥ for CNY, $
+// otherwise, e.g. USD).
+function fmtBalance(v: number, unit?: string): string {
+    return `${unit === "CNY" ? "¥" : "$"}${fmtQuota(v)}`;
+}
+
 function quotaTitle(w: WindowStatus): string {
+    if (w.key === "balance") return `${w.label}: ${fmtBalance(w.used, w.unit)}`;
     if (w.total <= 0) return "";
     return `${w.label}: 已用 ${fmtQuota(w.used)} / 总量 ${fmtQuota(w.total)}`;
 }
@@ -298,13 +306,14 @@ function snappedDir(): string {
 }
 
 // snapSlotWindows maps provider windows to the three reusable DOM slots. Relay
-// panels use one primary quota slot; other providers use their returned windows.
+// panels and balance accounts (DeepSeek/OpenRouter) use one primary quota slot;
+// other providers use their returned windows.
 function snapSlotWindows(res: ProviderResult | undefined): Map<SnapKey, WindowStatus> {
     const slots = new Map<SnapKey, WindowStatus>();
     const windows = res?.windows ?? [];
     const providerType = currentConfig?.providers.find(p => p.id === res?.providerId)?.type;
-    if (providerType === "sub2api" || providerType === "new-api" || windows.some(w => w.key === "total")) {
-        const primary = windows.find(w => w.key === "total") ?? windows[0];
+    if (providerType === "sub2api" || providerType === "new-api" || windows.some(w => w.key === "total" || w.key === "balance")) {
+        const primary = windows.find(w => w.key === "total" || w.key === "balance") ?? windows[0];
         if (primary) slots.set("5h", primary);
         return slots;
     }
@@ -398,6 +407,7 @@ const WINDOW_LABELS: Record<string, string> = {
     "weekly": "本周",
     "monthly": "本月",
     "total": "总额度",
+    "balance": "余额",
 };
 function thresholdLabel(k: string): string {
     return WINDOW_LABELS[k] ?? k;

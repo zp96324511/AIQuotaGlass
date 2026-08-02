@@ -18,6 +18,7 @@ type WindowStatus struct {
 	Total      float64 `json:"total"`      // raw quota limit; 0 means unavailable
 	ResetInSec int64   `json:"resetInSec"` // seconds until the window resets; -1 = no auto reset (countdown hidden)
 	Status     string  `json:"status"`     // "ok" or error marker
+	Unit       string  `json:"unit,omitempty"` // currency of Used/Total, e.g. "CNY", "USD" (balance windows)
 }
 
 // UsageDetail holds optional statistics parsed from a provider's history page.
