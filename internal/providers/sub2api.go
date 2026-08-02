@@ -48,6 +48,7 @@ func init() {
 		ProviderField{Key: "workspace", Label: "服务地址 (Base URL)", Kind: "text", Required: true, Placeholder: "https://your-sub2api.example.com"},
 		ProviderField{Key: "cookie", Label: "API Key", Kind: "password", Required: true, Placeholder: "sk- 开头的 API Key"},
 	)
+	RegisterWindows("sub2api", "total")
 }
 
 func newSub2API(cfg config.ProviderConfig) (Provider, error) {

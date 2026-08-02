@@ -58,6 +58,7 @@ interface ProviderType {
     name: string;
     description: string;
     fields: ProviderField[];
+    windowKeys: string[];
 }
 interface ProviderField {
     key: string;
@@ -380,6 +381,28 @@ function typeName(t: string): string {
     return providerTypes.find(x => x.type === t)?.name ?? t;
 }
 
+// windowKeysFor returns the quota window keys the given provider type emits,
+// i.e. the keys that should appear as threshold inputs in the settings panel.
+// Falls back to the legacy four when the type metadata has not loaded yet so
+// the form is still usable before AppService.GetProviderTypes() resolves.
+function windowKeysFor(t: string): string[] {
+    const keys = providerTypes.find(x => x.type === t)?.windowKeys;
+    if (keys && keys.length > 0) return keys;
+    return ["5h", "weekly", "monthly", "total"];
+}
+
+// thresholdLabel renders a human label for a window key. Defaults to the raw
+// key when no entry is registered (e.g. legacy "total" via the fallback).
+const WINDOW_LABELS: Record<string, string> = {
+    "5h": "5小时",
+    "weekly": "本周",
+    "monthly": "本月",
+    "total": "总额度",
+};
+function thresholdLabel(k: string): string {
+    return WINDOW_LABELS[k] ?? k;
+}
+
 // Get/set a provider config slot addressed by a ProviderField.Key.
 function getFieldValue(p: ProviderConfig, key: string): string {
     switch (key) {
@@ -438,10 +461,7 @@ function renderSettings() {
                 <label>名称 <input type="text" id="name_${i}" value="${escapeHtml(p.name)}"/></label>
                 ${fieldInputs}
                 <div class="thresholds">
-                    <label>5h阈值 <input type="number" id="th5_${i}" min="0" max="100" value="${p.alertThresholds["5h"] ?? 80}"/></label>
-                    <label>周阈值 <input type="number" id="thw_${i}" min="0" max="100" value="${p.alertThresholds["weekly"] ?? 80}"/></label>
-                    <label>月阈值 <input type="number" id="thm_${i}" min="0" max="100" value="${p.alertThresholds["monthly"] ?? 80}"/></label>
-                    <label>总额度阈值 <input type="number" id="tht_${i}" min="0" max="100" value="${p.alertThresholds["total"] ?? 80}"/></label>
+                    ${windowKeysFor(t).map(k => `<label>${thresholdLabel(k)}阈值 <input type="number" id="th_${k}_${i}" min="0" max="100" value="${p.alertThresholds[k] ?? 80}"/></label>`).join("")}
                 </div>
                 <div class="prov-actions">
                     <button type="button" class="del-btn" data-del="${i}">删除此账号</button>
@@ -494,17 +514,16 @@ function readProviderFromDom(i: number): ProviderConfig {
     const type = $<HTMLSelectElement>(`type_${i}`)?.value || "opencode-go";
         const sortEl = $<HTMLInputElement>(`sort_${i}`);
         const sortRaw = sortEl?.value.trim() ?? "";
+        const thresholds: Record<string, number> = {};
+        for (const k of windowKeysFor(type)) {
+            thresholds[k] = clampInt($<HTMLInputElement>(`th_${k}_${i}`)?.value ?? "", 0, 100);
+        }
         const p: ProviderConfig = {
         id: $<HTMLInputElement>(`id_${i}`).value || `prov_${i}`,
         type,
         name: $<HTMLInputElement>(`name_${i}`).value || "未命名厂商",
         enabled: $<HTMLInputElement>(`en_${i}`).checked,
-        alertThresholds: {
-            "5h": clampInt($<HTMLInputElement>(`th5_${i}`).value, 0, 100),
-            weekly: clampInt($<HTMLInputElement>(`thw_${i}`).value, 0, 100),
-            monthly: clampInt($<HTMLInputElement>(`thm_${i}`).value, 0, 100),
-            total: clampInt($<HTMLInputElement>(`tht_${i}`)?.value ?? "", 0, 100),
-        },
+        alertThresholds: thresholds,
         detail: {},
         sortOrder: sortRaw === "" ? i : clampInt(sortRaw, 0, 9999),
     };
@@ -552,6 +571,8 @@ function addProvider() {
     syncDraftFromDom();
     if (!draft) return;
     const t = providerTypes[0]?.type ?? "opencode-go";
+    const thresholds: Record<string, number> = {};
+    for (const k of windowKeysFor(t)) thresholds[k] = 80;
     draft.providers.push({
         id: nextProviderId(t),
         name: `${typeName(t)} ${draft.providers.length + 1}`,
@@ -559,7 +580,7 @@ function addProvider() {
         enabled: true,
         workspace: "",
         cookie: "",
-        alertThresholds: { "5h": 80, weekly: 80, monthly: 80, total: 80 },
+        alertThresholds: thresholds,
         detail: {},
         sortOrder: draft.providers.length,
     });

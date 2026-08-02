@@ -57,6 +57,7 @@ func init() {
 		ProviderField{Key: "cookie", Label: "Cookie (auth=...)", Kind: "password", Required: true, Placeholder: "Fe26.2**..."},
 		ProviderField{Key: "detail.showUsageDetail", Label: "统计使用明细 (请求/费用/缓存命中)", Kind: "checkbox"},
 	)
+	RegisterWindows("opencode-go", "5h", "weekly", "monthly")
 }
 
 func newOpenCodeGo(cfg config.ProviderConfig) (Provider, error) {

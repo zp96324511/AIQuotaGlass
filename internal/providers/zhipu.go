@@ -44,6 +44,7 @@ func init() {
 		ProviderField{Key: "cookie", Label: "API Key", Kind: "password", Required: true, Placeholder: "uuid 格式的 API Key"},
 		ProviderField{Key: "detail.international", Label: "国际站 z.ai", Kind: "checkbox"},
 	)
+	RegisterWindows("zhipu", "5h", "weekly")
 }
 
 func newZhipu(cfg config.ProviderConfig) (Provider, error) {

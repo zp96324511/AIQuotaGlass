@@ -38,6 +38,7 @@ func init() {
 		},
 		ProviderField{Key: "cookie", Label: "API Key", Kind: "password", Required: true, Placeholder: "sk- 开头的 API Key"},
 	)
+	RegisterWindows("kimi", "5h", "weekly")
 }
 
 func newKimi(cfg config.ProviderConfig) (Provider, error) {

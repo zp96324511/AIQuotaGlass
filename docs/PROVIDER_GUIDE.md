@@ -18,6 +18,7 @@ internal/providers/
 
 - **`Provider` 接口**：一个厂商 = 一个实现该接口的类型，职责是「根据持久化配置，查询该账号的用量窗口」。
 - **`Register()`**：各厂商文件 `init()` 中自注册，把 `typeKey` → 工厂函数 + UI schema 写入注册表。
+- **`RegisterWindows()`**：声明该厂商实际发出的用量窗口键（`5h`/`weekly`/`monthly`/`total`），设置面板据此只渲染**适用**的阈值输入。
 - **`ProviderField`**：声明该厂商在设置面板的动态参数表单（API Key、workspace、教程等）。
 - **前端零改动**：设置面板按注册的 `Fields` 动态渲染表单；主窗口按 `Result.Windows` 渲染进度条。
 
@@ -200,7 +201,29 @@ type Provider interface {
 | `checkbox` | `detail.<flag>` | 开关 | 厂商专属开关，存到 `ProviderConfig.Detail`（如智谱的 `detail.international`） |
 | `help` | `""` | 可折叠教程框 | `Label` 为多行步骤文案（`\n` 换行），教用户如何获取凭据 |
 
-约定：表单字段顺序 = `Register` 传入顺序，help 放最前。阈值（5h/周/月）是通用字段，前端始终渲染，无需声明。
+约定：表单字段顺序 = `Register` 传入顺序，help 放最前。
+
+### 阈值窗口（`RegisterWindows()`）
+
+设置面板的「阈值」输入并非通用——每个厂商实际发出的用量窗口不同（中转面板只发总额度、智谱没有月度窗口等）。在 `Register()` 之后调用 `RegisterWindows(typeKey, keys...)` 声明该厂商支持的窗口键，前端 `windowKeysFor()` 据此只渲染**适用**的阈值输入，告警循环也只对声明过的 key 去重。
+
+```go
+func init() {
+    Register("example", "Example AI", "...", newExample,
+        ProviderField{Key: "cookie", Label: "API Key", Kind: "password", Required: true},
+    )
+    // 与 Query() 实际 append 到 res.Windows 的 Key 完全一致
+    RegisterWindows("example", "5h", "weekly", "monthly")
+}
+```
+
+| 厂商 | 实际窗口 | 阈值输入数 |
+|---|---|---|
+| `opencode-go` | `5h` / `weekly` / `monthly` | 3 |
+| `zhipu` / `kimi` / `minimax` | `5h` / `weekly` | 2 |
+| `new-api` / `sub2api` | `total` | 1 |
+
+未声明 `RegisterWindows` 的厂商：设置面板不显示阈值输入，告警循环跳过全部窗口（用于无额度概念的厂商或尚未适配的实验类型）。
 
 ## 5. 多账号
 

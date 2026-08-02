@@ -45,6 +45,7 @@ func init() {
 		ProviderField{Key: "cookie", Label: "API Key", Kind: "password", Required: true, Placeholder: "minimax- 开头的 API Key"},
 		ProviderField{Key: "detail.international", Label: "国际站 (api.minimax.io)", Kind: "checkbox"},
 	)
+	RegisterWindows("minimax", "5h", "weekly")
 }
 
 func newMiniMax(cfg config.ProviderConfig) (Provider, error) {

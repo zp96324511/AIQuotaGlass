@@ -96,9 +96,9 @@ OS 专属代码全部 platform-tagged,业务层通过接口解耦:
 ### 4.2 internal/providers
 - `Provider` 接口:`ID()/Name()/Query(ctx) (*Result, error)`
 - `Result`:providerId、providerName、windows[]、detail、updatedAt、error
-- `WindowStatus`:key(5h/weekly/monthly)、label、percent、used/total(有限额度原始数值; total=0 表示不可用)、resetInSec、status
+- `WindowStatus`:key(5h/weekly/monthly/total)、label、percent、used/total(有限额度原始数值; total=0 表示不可用)、resetInSec、status
 - `UsageDetail`:requests、cost(USD)、cacheHit(百分比)——由使用历史页聚合
-- **插件式注册表**:`Register(type, name, desc, factory, fields...)` 由各厂商文件 `init()` 自注册。`fields` 声明该类型在设置面板的**动态参数表单**(`ProviderField`: key → ProviderConfig 槽位 workspace/cookie/detail.showUsageDetail、label、kind text/password/checkbox)。`New(cfg)` 按 `cfg.Type` 查表路由;`Types()` 返回类型+字段 schema 供 UI 渲染。加厂商 = 加一个 Go 文件 + `init()` 注册,主程序与前端零改动;前端表单自动按 schema 加载
+- **插件式注册表**:`Register(type, name, desc, factory, fields...)` 由各厂商文件 `init()` 自注册。`fields` 声明该类型在设置面板的**动态参数表单**(`ProviderField`: key → ProviderConfig 槽位 workspace/cookie/detail.showUsageDetail、label、kind text/password/checkbox)。`RegisterWindows(typeKey, keys...)` 在 `Register()` 之后调用,声明该厂商实际发出的用量窗口键,前端据此只渲染**适用**的阈值输入(中转面板只 total、智谱无月窗口)。`New(cfg)` 按 `cfg.Type` 查表路由;`Types()` 返回 `ProviderType{...WindowKeys}` 供 UI 渲染。加厂商 = 加一个 Go 文件 + `init()` 注册,主程序与前端零改动;前端表单按 schema 自动加载
 - **多账号**:`AppConfig.Providers` 是列表,同 `type` 允许多实例(每个实例独立 id/workspace/cookie/阈值)。设置面板支持添加/删除账号,`id` 必须唯一(告警去重键 = `providerID/windowKey`)。每次 `refresh` 为每个启用实例 `New()` 一个 provider 串行查询
 - **限制**:Go `plugin` 包不支持 Windows,无运行时动态加载;第三方插件需外部进程模型(未实现)
 

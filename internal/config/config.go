@@ -61,6 +61,9 @@ func Default() *AppConfig {
 				},
 			},
 		},
+		// No default thresholds for other provider types — the settings UI
+		// seeds them based on the type's registered window keys (see
+		// providers.RegisterWindows). Saving back drops irrelevant keys.
 	}
 }
 

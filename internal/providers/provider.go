@@ -77,6 +77,11 @@ type ProviderType struct {
 	Name        string          `json:"name"`        // display name
 	Description string          `json:"description"` // one-line summary shown in the UI
 	Fields      []ProviderField `json:"fields"`      // dynamic parameter form for this type
+	// WindowKeys lists the quota window keys this provider emits (e.g. "5h",
+	// "weekly", "monthly", "total"). The settings UI renders one threshold
+	// input per key, scoped to the provider type so it never asks for a value
+	// the provider never reports. Empty (or nil) means "no quota windows".
+	WindowKeys []string `json:"windowKeys"`
 }
 
 // Factory builds a provider instance from its persisted configuration.
@@ -102,6 +107,32 @@ func Register(typeKey, name, description string, factory Factory, fields ...Prov
 	typeInfo[typeKey] = ProviderType{
 		Type: typeKey, Name: name, Description: description, Fields: fields,
 	}
+}
+
+// RegisterWindows declares the quota window keys a registered provider type
+// emits (e.g. "5h", "weekly", "monthly", "total"). The settings UI uses this
+// to render only the threshold inputs that actually apply to the type. Call
+// from the provider's init() right after Register(); panics if the type is
+// not registered or if a duplicate window key is given.
+func RegisterWindows(typeKey string, keys ...string) {
+	info, ok := typeInfo[typeKey]
+	if !ok {
+		panic("providers: RegisterWindows for unregistered type " + typeKey)
+	}
+	seen := make(map[string]struct{}, len(keys))
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k == "" {
+			continue
+		}
+		if _, dup := seen[k]; dup {
+			panic("providers: RegisterWindows duplicate key " + k + " for type " + typeKey)
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	info.WindowKeys = out
+	typeInfo[typeKey] = info
 }
 
 // New builds a provider instance for the given config, dispatching on Type
