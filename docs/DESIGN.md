@@ -80,7 +80,7 @@
 OS 专属代码全部 platform-tagged,业务层通过接口解耦:
 - `windowControl` 接口(app.go):`SetAlwaysOnTop/SetPosition/Position/Quit/NativeHandle`,`wailsWindow`(window_adapter.go)实现
 - `snap(hwnd, on)` / `mouseLeftDown()`:snap_*.go
-- `Notifier` 接口:notify_windows.go(PowerShell toast)、non-windows noop
+- `Notifier` 接口:notify_windows.go(原生 Shell_NotifyIconW 气球)、non-windows noop
 - `edge` 包:w32 实现,`WorkArea` 走原生 SPI_GETWORKAREA syscall
 - 窗口透明度不再走原生层(与 DirectComposition 冲突),由前端 `document.body.style.opacity` 实现
 
@@ -95,7 +95,7 @@ OS 专属代码全部 platform-tagged,业务层通过接口解耦:
 
 ### 4.2 internal/providers
 - `Provider` 接口:`ID()/Name()/Query(ctx) (*Result, error)`
-- `Result`:providerId、providerName、windows[]、detail、updatedAt、error
+- `Result`:providerId、providerName、windows[]、可选 detail、updatedAt、error; detail 指针为 nil 表示可选明细不可用,活动指标解析成功时内部标记有效
 - `WindowStatus`:key(5h/weekly/monthly/total)、label、percent、used/total(有限额度原始数值; total=0 表示不可用)、resetInSec、status
 - `UsageDetail`:requests、cost(USD)、cacheHit(百分比)——由使用历史页聚合
 - **插件式注册表**:`Register(type, name, desc, factory, fields...)` 由各厂商文件 `init()` 自注册。`fields` 声明该类型在设置面板的**动态参数表单**(`ProviderField`: key → ProviderConfig 槽位 workspace/cookie/detail.showUsageDetail、label、kind text/password/checkbox)。`RegisterWindows(typeKey, keys...)` 在 `Register()` 之后调用,声明该厂商实际发出的用量窗口键,前端据此只渲染**适用**的阈值输入(中转面板只 total、智谱无月窗口、DeepSeek/OpenRouter 余额型只 balance)。`New(cfg)` 按 `cfg.Type` 查表路由;`Types()` 返回 `ProviderType{...WindowKeys}` 供 UI 渲染。加厂商 = 加一个 Go 文件 + `init()` 注册,主程序与前端零改动;前端表单按 schema 自动加载
@@ -153,8 +153,8 @@ scheduler tick
       → 与阈值比较 → 边缘触发 → Event("usage:alert") + notify.Show
   → Event("usage:update", {configVersion, roundId, results}) ──► 前端更新单卡
   → 等全部查询完成
-  → 比较本轮与上轮额度快照
-  → 额度发生变化的账号记录 lastChangedRound
+  → 比较本轮与上轮活动快照(窗口 Percent/Used/Total/Unit/Status + 可用明细 Requests/Cost/CacheHit/TodayCost/PeriodCost)
+  → 额度或有效用量明细发生变化的账号记录 lastChangedRound; 普通 ResetInSec 倒计时递减忽略,重置后倒计时重新变大(>5s)、错误状态进入或恢复时记录; 明细查询失败沿用上一份有效基线
   → Event("usage:complete", {configVersion, roundId, changedProviderIds, providerIds})
       ──► 前端统一调整卡片顺序
 ```
@@ -219,7 +219,7 @@ scheduler tick
 ## 9. 跨平台策略
 - Go 后端、providers、config、scheduler 三平台同代码
 - 窗口透明/贴边/置顶按 OS 拆平台文件;透明度走前端 CSS(跨平台天然一致);Linux 透明受 WebKitGTK/Wayland 限制(可能降级为实心卡片)
-- 通知:Windows = PowerShell toast;其他平台接入系统通知(预留 Notifier 接口)
+- 通知:Windows = 原生 Shell_NotifyIconW 气球(无 PowerShell 子进程);其他平台接入系统通知(预留 Notifier 接口)
 - 新增平台 = 补 window/notify 平台文件,业务零改动
 
 ## 10. 构建与运行

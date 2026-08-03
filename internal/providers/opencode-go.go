@@ -70,10 +70,15 @@ func newOpenCodeGo(cfg config.ProviderConfig) (Provider, error) {
 func (p *openCodeGo) ID() string   { return p.cfg.ID }
 func (p *openCodeGo) Name() string { return p.cfg.Name }
 
-func (p *openCodeGo) fetch(ctx context.Context, path string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, opencodeGoBase+path, nil)
+// fetch GETs a console page. On a non-200 response it returns an ErrorInfo
+// carrying the status and a response-body snippet for the card's request-info
+// modal; the third return value is nil when the failure produced no HTTP
+// response.
+func (p *openCodeGo) fetch(ctx context.Context, path string) ([]byte, *ErrorInfo, error) {
+	url := opencodeGoBase + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Tolerate the auth= prefix users copy along from DevTools.
 	req.Header.Set("Cookie", "auth="+strings.TrimPrefix(p.cfg.Cookie, "auth="))
@@ -81,17 +86,17 @@ func (p *openCodeGo) fetch(ctx context.Context, path string) ([]byte, error) {
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
+		return nil, httpErrorInfo(http.MethodGet, url, resp.StatusCode, body), fmt.Errorf("status %d", resp.StatusCode)
 	}
-	return body, nil
+	return body, nil, nil
 }
 
 func (p *openCodeGo) Query(ctx context.Context) (*Result, error) {
@@ -102,9 +107,10 @@ func (p *openCodeGo) Query(ctx context.Context) (*Result, error) {
 	}
 
 	path := "/workspace/" + p.cfg.Workspace + "/go"
-	body, err := p.fetch(ctx, path)
+	body, ei, err := p.fetch(ctx, path)
 	if err != nil {
 		res.Error = fmt.Sprintf("查询失败: %v", err)
+		res.ErrorInfo = ei
 		return res, err
 	}
 	if reAuthPage.Match(body) {
@@ -126,7 +132,7 @@ func (p *openCodeGo) Query(ctx context.Context) (*Result, error) {
 
 	if p.cfg.Detail.ShowUsageDetail {
 		if d, err := p.queryDetail(ctx); err == nil {
-			res.Detail = d
+			res.Detail = &d
 		}
 	}
 	return res, nil
@@ -134,12 +140,22 @@ func (p *openCodeGo) Query(ctx context.Context) (*Result, error) {
 
 // queryDetail parses the usage history page for per-request statistics.
 func (p *openCodeGo) queryDetail(ctx context.Context) (UsageDetail, error) {
-	var d UsageDetail
-	body, err := p.fetch(ctx, "/workspace/"+p.cfg.Workspace+"/usage")
+	body, _, err := p.fetch(ctx, "/workspace/"+p.cfg.Workspace+"/usage")
 	if err != nil {
-		return d, err
+		return UsageDetail{}, err
 	}
+	return parseOpenCodeGoDetail(body)
+}
+
+// parseOpenCodeGoDetail aggregates per-request statistics from the usage page
+// body. A page without any matching records is treated as an unavailable
+// detail result (error) rather than a valid zero reading.
+func parseOpenCodeGoDetail(body []byte) (UsageDetail, error) {
 	matches := reRecord.FindAllSubmatch(body, -1)
+	if len(matches) == 0 {
+		return UsageDetail{}, fmt.Errorf("parse usage page: no usage records")
+	}
+	var d UsageDetail
 	var in, cache int64
 	for _, m := range matches {
 		in += parseInt(m[3])
@@ -153,6 +169,7 @@ func (p *openCodeGo) queryDetail(ctx context.Context) (UsageDetail, error) {
 	if in+cache > 0 {
 		d.CacheHit = float64(cache) / float64(in+cache) * 100
 	}
+	d.MarkUsageMetricsAvailable()
 	return d, nil
 }
 

@@ -169,9 +169,20 @@ type Provider interface {
 |---|---|
 | `ProviderID` / `ProviderName` | 回填自 cfg，勿硬编码 |
 | `Windows []WindowStatus` | 用量窗口列表（5h/周/月），**告警维度** |
-| `Detail UsageDetail` | 可选统计（requests / cost USD / cacheHit %），无则留零值 |
+| `Detail *UsageDetail` | 可选统计（requests / cost USD / cacheHit %），无则为 nil；成功解析活动指标时调用 `MarkUsageMetricsAvailable()` |
 | `UpdatedAt` | `time.Now().Format("15:04:05")` |
 | `Error string` | **非空 = 查询失败**，前端显示该字符串。失败时仍要返回 res（带上 Error）+ err |
+| `ErrorInfo *ErrorInfo` | 失败请求的结构化信息（`Method/URL/StatusCode/Body`），非 2xx 响应用 `httpErrorInfo(method, url, status, body)` 填充；网络错误（无 HTTP 响应）留 nil。前端据此显示 `HTTP 状态码 · 响应体片段` 并开启"更多"弹窗 |
+
+### 动态排序的活动契约（重要）
+
+主窗口按"整轮活动变化"把最近活动的账号排到前面。`Result` 的以下字段会参与变化判定：
+
+- **窗口数值/状态**：`Percent/Used/Total/Unit` 任一变化，或 `Status` 变化，都会计为活动。
+- **明细活动指标**：成功解析且调用过 `MarkUsageMetricsAvailable()` 后，`Requests/Cost/CacheHit/TodayCost/PeriodCost` 任一变化计为活动；只有元数据（`GroupName/ExpiresAt/...`）变化不计。
+- **倒计时**：普通 `ResetInSec` 递减不触发；重置后倒计时重新变大（>5s 抖动阈值）才计为活动。不要为了表达重置而自行增减该值。
+- **错误状态**：`Error` 从空变非空（进入错误）、非空变空（恢复）各触发一次；持续错误不重复触发（只比较错误状态布尔）。
+- **明细不可用**：可选明细查询失败时应返回错误或保持 `Detail` 为 nil——后端会沿用上一份有效明细基线，不会把空明细误判为变化。**不要**在解析失败时返回一个"全零但标记可用"的 `UsageDetail`。
 
 ### WindowStatus
 
@@ -186,9 +197,11 @@ type Provider interface {
 ### 错误约定（重要）
 
 1. **不要** panic；网络/解析错误一律走返回值。
-2. **凭据错误**（401/403、业务响应提示 key 无效）→ `res.Error = "API Key 无效或已过期"`（前端按此文案给出可行动的提示）。
-3. 网络失败 → `res.Error = fmt.Sprintf("查询失败: %v", err)`。
-4. 每次都返回非 nil 的 res（带 Error 字段），err 供日志。
+2. **凭据错误**（401/403、业务响应提示 key 无效）→ `res.Error = "API Key 无效或已过期"`（前端按此文案给出可行动的提示）。同时用 `res.ErrorInfo = httpErrorInfo(method, url, resp.StatusCode, body)` 填充——响应体片段会展示在卡片错误行，供用户排查。
+3. 其他非 2xx 状态码：`res.Error = fmt.Sprintf("查询失败: HTTP %d", ...)` + `ErrorInfo`（同上）。`httpErrorInfo` 会自动剥离控制字符（含 ANSI 转义）、压缩空白并截断到 500 字符。
+4. 凭据与敏感信息（cookie/API key）只放请求 **Header**；`ErrorInfo.URL` 会被展示到前端弹窗，绝不能带凭据。
+5. 网络失败 → `res.Error = fmt.Sprintf("查询失败: %v", err)`（无 HTTP 响应，`ErrorInfo` 留 nil）。
+6. 每次都返回非 nil 的 res（带 Error 字段），err 供日志。
 
 ## 4. 参数表单 schema（ProviderField）
 

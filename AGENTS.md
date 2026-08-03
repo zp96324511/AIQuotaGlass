@@ -46,7 +46,7 @@ frontend/                   玻璃拟态 UI;src/main.ts 双窗口模式,public/s
 
 - **Wails 绑定**:只有 `AppService` 的**导出**方法进入 `frontend/bindings`。接口类型参数无法 JSON 序列化——`setup` 必须小写。新增绑定方法 = 导出方法,参数/返回值用可 JSON 类型。
 - **前端调用**:`import { AppService } from "../bindings/aiquotaglass"`(绑定是模块,不是类);事件用 `@wailsio/runtime` 的 `Events.On`。
-- **事件协议**(后端→前端):`usage:loading`({configVersion,roundId,providerIds})、`usage:update`({configVersion,roundId,results})、`usage:complete`({configVersion,roundId,changedProviderIds,providerIds})、`usage:alert`({provider,window,percent,threshold})、`config:saved`({version,roundId,config})。`configVersion` 屏蔽配置切换前后的异步事件,`roundId` 丢弃旧轮次; 卡片位置只在 `usage:complete` 后按整轮额度变化排序。
+- **事件协议**(后端→前端):`usage:loading`({configVersion,roundId,providerIds})、`usage:update`({configVersion,roundId,results})、`usage:complete`({configVersion,roundId,changedProviderIds,providerIds,changedAt})、`usage:alert`({provider,window,percent,threshold})、`config:saved`({version,roundId,config})。`configVersion` 屏蔽配置切换前后的异步事件,`roundId` 丢弃旧轮次; 卡片位置只在 `usage:complete` 后按整轮活动变化排序。`changedAt`(providerId→unix 秒)供前端显示"最近活跃时间"徽标。`Result.errorInfo`({method,url,statusCode,body})携带失败请求的状态码与截断响应体,错误行显示 `HTTP 状态码 · body片段` 并提供"更多"按钮打开请求信息弹窗(数据从 `results` 按 providerId 取,不经闭包,渲染重建安全)。变化判定比较窗口的 `Percent/Used/Total/Unit/Status`，以及可用时的用量明细 `Requests/Cost/CacheHit/TodayCost/PeriodCost`; 普通 `ResetInSec` 倒计时递减不触发,重置后倒计时重新变大(超过 5s 抖动阈值)才触发; 请求错误状态进入/恢复触发,持续错误状态不重复触发(只比较错误状态布尔,不比较错误文案)。忽略描述字段。可选明细查询失败时沿用上一份有效明细基线,不把空明细误判为额度变化。
 - **双窗口**:主窗口为悬浮小窗;`AppService.OpenSettings()` 懒创建设置弹窗(`URL: /?settings=1`),`CloseSettings()` 关闭。前端用 `location.search` 判断 `?settings=1` 进入设置模式(隐藏 widget、显示 `.settings-win`)。事件全局广播,两窗口都能收到。
 - **托盘/关闭行为**:主窗 ✕ 按钮 = `HideToTray()`(隐藏,进程驻留继续刷新);`WindowClosing` 钩子(RegisterHook)同样转隐藏并 `e.Cancel()`;真正的退出只有托盘菜单「退出」(或 `AppService.Quit()`)。必须保持 `Windows.DisableQuitOnLastWindowClosed: true` + `HiddenOnTaskbar`,否则隐藏/关窗会退出进程。托盘用 `app.SystemTray.New()` + `SetMenu`(显示窗口/刷新数据/退出),左键点击显示窗口。
 - **拖拽**:Wails v3 的 JS 拖拽机制,元素 CSS 设 `--wails-draggable: drag`,按钮等禁拖区设 `no-drag`。**不要用** `-webkit-app-region`(WebView2 不支持)。见 `drag.js`:`mousedown` 后 `mousemove` 触发 `invoke("wails:drag")` → 后端 `PostMessage(WM_NCLBUTTONDOWN, HTCAPTION)`。
@@ -61,7 +61,7 @@ frontend/                   玻璃拟态 UI;src/main.ts 双窗口模式,public/s
 ## 已知坑(踩过)
 
 1. **默认数据目录不可写时的应对**:`config.json` 与 WebView2 数据默认写 `os.UserConfigDir()`(Windows 为 `%AppData%\AIQuotaGlass`);该分区空间不足时应用启动会失败——用 `AQUOTA_CONFIG_DIR` 环境变量把运行数据目录迁移到其他分区。
-2. **OpenCode 用量无独立 JSON API**——数据 SSR 内嵌在页面 HTML(`rollingUsage:`/`usage.list`),用正则解析。字段含 `$R[NN]=` 混淆,详见 `internal/providers/opencode.go` 的 `reWindows`/`reRecord`。
+2. **OpenCode 用量无独立 JSON API**——数据 SSR 内嵌在页面 HTML(`rollingUsage:`/`usage.list`),用正则解析。字段含 `$R[NN]=` 混淆,详见 `internal/providers/opencode-go.go` 的 `reWindows`/`reRecord`。
 3. 验证 opencode 接口用 `curl.exe`,**不要用** `Invoke-WebRequest`(会 302 跳 OpenAuth 登录页)。
 4. Wails v3 alpha **没有内置通知 API**——通知走原生 `Shell_NotifyIconW` 气球(`internal/notify/notify_windows.go`),通过 `wails/v3/pkg/w32` 包直接 syscall,不启动 PowerShell 子进程,不写 .ps1 脚本文件。HWND 由 `notify.BindHWND(hwnd)` 在 `main.go` 窗口创建后注入。非 Windows 平台降级为 noop(`notify_other.go`)。
 5. 透明窗口:`BackgroundTypeTransparent` 创建时生效;运行时透明度**必须走前端 CSS**(`document.body.style.opacity`)。原生 SetLayeredWindowAttributes(WS_EX_LAYERED)与 DirectComposition 冲突会破坏渲染——不要再走原生路径。

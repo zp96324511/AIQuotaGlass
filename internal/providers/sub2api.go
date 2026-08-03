@@ -96,10 +96,12 @@ func (p *sub2API) Query(ctx context.Context) (*Result, error) {
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		res.Error = "API Key 无效或已过期"
+		res.ErrorInfo = httpErrorInfo(http.MethodGet, base+sub2apiPath, resp.StatusCode, body)
 		return res, fmt.Errorf("sub2api auth failed: HTTP %d", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		res.Error = fmt.Sprintf("查询失败: HTTP %d", resp.StatusCode)
+		res.ErrorInfo = httpErrorInfo(http.MethodGet, base+sub2apiPath, resp.StatusCode, body)
 		return res, fmt.Errorf("sub2api status %d", resp.StatusCode)
 	}
 
@@ -115,7 +117,7 @@ func (p *sub2API) Query(ctx context.Context) (*Result, error) {
 
 // queryDetail assembles the detail row: cost figures from the /v1/usage body
 // plus, best-effort, the billing multiplier from /v1/sub2api/billing.
-func (p *sub2API) queryDetail(ctx context.Context, base string, usageBody []byte) UsageDetail {
+func (p *sub2API) queryDetail(ctx context.Context, base string, usageBody []byte) *UsageDetail {
 	now := time.Now()
 	var d UsageDetail
 	if parsed, err := parseSub2APIUsageDetail(usageBody, now); err == nil {
@@ -127,7 +129,7 @@ func (p *sub2API) queryDetail(ctx context.Context, base string, usageBody []byte
 			d.PeakActive = peak
 		}
 	}
-	return d
+	return &d
 }
 
 // get performs a GET with the key's bearer auth and returns the body on 200.
@@ -184,13 +186,13 @@ func parseSub2APIUsage(body []byte, now time.Time) ([]WindowStatus, error) {
 			ResetAt   any    `json:"reset_at"`
 		} `json:"rate_limits"`
 		Subscription *struct {
-			DailyUsageUSD    float64 `json:"daily_usage_usd"`
-			WeeklyUsageUSD   float64 `json:"weekly_usage_usd"`
-			MonthlyUsageUSD  float64 `json:"monthly_usage_usd"`
-			DailyLimitUSD    float64 `json:"daily_limit_usd"`
-			WeeklyLimitUSD   float64 `json:"weekly_limit_usd"`
-			MonthlyLimitUSD  float64 `json:"monthly_limit_usd"`
-			WeeklyWindowStart any    `json:"weekly_window_start"`
+			DailyUsageUSD     float64 `json:"daily_usage_usd"`
+			WeeklyUsageUSD    float64 `json:"weekly_usage_usd"`
+			MonthlyUsageUSD   float64 `json:"monthly_usage_usd"`
+			DailyLimitUSD     float64 `json:"daily_limit_usd"`
+			WeeklyLimitUSD    float64 `json:"weekly_limit_usd"`
+			MonthlyLimitUSD   float64 `json:"monthly_limit_usd"`
+			WeeklyWindowStart any     `json:"weekly_window_start"`
 		} `json:"subscription"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -267,8 +269,8 @@ func parseSub2APIUsage(body []byte, now time.Time) ([]WindowStatus, error) {
 // subscription.expires_at (subscription mode); wallet mode has neither.
 func parseSub2APIUsageDetail(body []byte, now time.Time) (UsageDetail, error) {
 	var payload struct {
-		PlanName    string  `json:"planName"`
-		ExpiresAt   *string `json:"expires_at"`
+		PlanName     string  `json:"planName"`
+		ExpiresAt    *string `json:"expires_at"`
 		Subscription *struct {
 			ExpiresAt *string `json:"expires_at"`
 		} `json:"subscription"`
@@ -292,6 +294,7 @@ func parseSub2APIUsageDetail(body []byte, now time.Time) (UsageDetail, error) {
 	}
 
 	var d UsageDetail
+	metricsReported := payload.Usage != nil && payload.Usage.Today != nil || len(payload.DailyUsage) > 0
 	if t := payload.Usage; t != nil && t.Today != nil {
 		today := t.Today
 		d.Requests = int(today.Requests)
@@ -328,8 +331,11 @@ func parseSub2APIUsageDetail(body []byte, now time.Time) (UsageDetail, error) {
 		}
 	}
 
-	if d.TodayCost <= 0 && d.PeriodCost <= 0 && d.Requests == 0 && d.GroupName == "" && d.ExpiresAt == "" {
+	if !metricsReported && d.GroupName == "" && d.ExpiresAt == "" {
 		return UsageDetail{}, fmt.Errorf("no usage data")
+	}
+	if metricsReported {
+		d.MarkUsageMetricsAvailable()
 	}
 	return d, nil
 }

@@ -11,7 +11,7 @@ import (
 	"aiquotaglass/internal/providers"
 )
 
-// refresh queries enabled providers concurrently, but commits quota-change
+// refresh queries enabled providers concurrently, but commits activity-change
 // detection only after every provider in the logical round has returned.
 func (s *AppService) refresh(ctx context.Context) {
 	s.refreshMu.Lock()
@@ -116,17 +116,24 @@ func (s *AppService) commitQuotaRound(roundID, configVersion uint64, cfg *config
 	if s.lastChangedRound == nil {
 		s.lastChangedRound = map[string]uint64{}
 	}
+	if s.lastChangedAt == nil {
+		s.lastChangedAt = map[string]int64{}
+	}
 
 	changed := make(map[string]struct{})
 	for i := range results {
 		res := results[i]
-		if res.Error != "" {
-			continue
-		}
 		snapshot := quotaSnapshotOf(res)
 		previous, seen := s.quotaSnapshots[res.ProviderID]
+		if seen && !snapshot.HasError && !snapshot.HasDetail && previous.HasDetail {
+			// Optional detail queries may fail while quota windows still succeed.
+			// Keep the last valid detail baseline instead of treating absence as usage.
+			snapshot.Detail = previous.Detail
+			snapshot.HasDetail = true
+		}
 		if seen && !quotaSnapshotsEqual(previous, snapshot) && dynamicSortEnabled(cfg, res.ProviderID) {
 			s.lastChangedRound[res.ProviderID] = roundID
+			s.lastChangedAt[res.ProviderID] = time.Now().Unix()
 			changed[res.ProviderID] = struct{}{}
 		}
 		s.quotaSnapshots[res.ProviderID] = snapshot
@@ -148,6 +155,7 @@ func (s *AppService) commitQuotaRound(roundID, configVersion uint64, cfg *config
 		RoundID:            roundID,
 		ChangedProviderIDs: changedIDs,
 		ProviderIDs:        order,
+		ChangedAt:          s.lastChangedAt,
 	}
 	return event
 }

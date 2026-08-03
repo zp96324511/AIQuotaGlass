@@ -58,6 +58,7 @@ type AppService struct {
 	configVersion    uint64
 	quotaSnapshots   map[string]quotaSnapshot
 	lastChangedRound map[string]uint64
+	lastChangedAt    map[string]int64 // providerID -> unix seconds of the last quota change
 
 	snapMu  sync.Mutex // serializes snap state with native window geometry changes
 	snapped string     // current edge the widget is docked to ("" = full size)
@@ -199,6 +200,7 @@ func (s *AppService) SaveConfig(cfg *config.AppConfig) error {
 	s.lastStatus = nil
 	s.quotaSnapshots = map[string]quotaSnapshot{}
 	s.lastChangedRound = map[string]uint64{}
+	s.lastChangedAt = map[string]int64{}
 	savedCfg := cloneAppConfig(s.cfg)
 	configVersion := s.configVersion
 	barrierRoundID := s.refreshRound

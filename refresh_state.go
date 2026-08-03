@@ -9,13 +9,35 @@ import (
 )
 
 type quotaWindowSnapshot struct {
-	Percent float64
-	Used    float64
-	Total   float64
-	Unit    string
+	Percent    float64
+	Used       float64
+	Total      float64
+	Unit       string
+	Status     string
+	ResetInSec int64
 }
 
-type quotaSnapshot map[string]quotaWindowSnapshot
+type usageDetailSnapshot struct {
+	Requests   int
+	Cost       float64
+	CacheHit   float64
+	TodayCost  float64
+	PeriodCost float64
+}
+
+type quotaWindowsSnapshot map[string]quotaWindowSnapshot
+
+type quotaSnapshot struct {
+	Windows quotaWindowsSnapshot
+	// Detail tracks activity-sensitive numeric fields, not countdown or descriptive metadata.
+	Detail    usageDetailSnapshot
+	HasDetail bool
+	HasError  bool
+}
+
+// Small increases can come from provider rounding or request timing; a larger
+// increase means the rolling window reset and should count as recent activity.
+const resetCountdownJitterSec int64 = 5
 
 func (s *AppService) configSnapshot() *config.AppConfig {
 	cfg, _ := s.configSnapshotWithVersion()
@@ -73,31 +95,62 @@ func dynamicSortEnabled(cfg *config.AppConfig, providerID string) bool {
 }
 
 func quotaSnapshotOf(res providers.Result) quotaSnapshot {
-	snapshot := make(quotaSnapshot, len(res.Windows))
+	windows := make(quotaWindowsSnapshot, len(res.Windows))
 	for i := range res.Windows {
 		w := res.Windows[i]
-		snapshot[w.Key] = quotaWindowSnapshot{
-			Percent: w.Percent,
-			Used:    w.Used,
-			Total:   w.Total,
-			Unit:    w.Unit,
+		windows[w.Key] = quotaWindowSnapshot{
+			Percent:    w.Percent,
+			Used:       w.Used,
+			Total:      w.Total,
+			Unit:       w.Unit,
+			Status:     w.Status,
+			ResetInSec: w.ResetInSec,
 		}
+	}
+	snapshot := quotaSnapshot{Windows: windows, HasError: res.Error != ""}
+	if res.Detail != nil && res.Detail.HasUsageMetrics() {
+		snapshot.Detail = usageDetailSnapshot{
+			Requests:   res.Detail.Requests,
+			Cost:       res.Detail.Cost,
+			CacheHit:   res.Detail.CacheHit,
+			TodayCost:  res.Detail.TodayCost,
+			PeriodCost: res.Detail.PeriodCost,
+		}
+		snapshot.HasDetail = true
 	}
 	return snapshot
 }
 
 func quotaSnapshotsEqual(left, right quotaSnapshot) bool {
-	if len(left) != len(right) {
+	if left.HasError != right.HasError {
 		return false
 	}
-	for key, l := range left {
-		r, ok := right[key]
-		if !ok || l.Unit != r.Unit || !quotaValueEqual(l.Percent, r.Percent) ||
-			!quotaValueEqual(l.Used, r.Used) || !quotaValueEqual(l.Total, r.Total) {
+	if len(left.Windows) != len(right.Windows) {
+		return false
+	}
+	for key, l := range left.Windows {
+		r, ok := right.Windows[key]
+		if !ok || l.Unit != r.Unit || l.Status != r.Status || quotaResetChanged(l.ResetInSec, r.ResetInSec) ||
+			!quotaValueEqual(l.Percent, r.Percent) || !quotaValueEqual(l.Used, r.Used) ||
+			!quotaValueEqual(l.Total, r.Total) {
 			return false
 		}
 	}
-	return true
+	if !left.HasDetail || !right.HasDetail {
+		return true
+	}
+	return left.Detail.Requests == right.Detail.Requests &&
+		quotaValueEqual(left.Detail.Cost, right.Detail.Cost) &&
+		quotaValueEqual(left.Detail.CacheHit, right.Detail.CacheHit) &&
+		quotaValueEqual(left.Detail.TodayCost, right.Detail.TodayCost) &&
+		quotaValueEqual(left.Detail.PeriodCost, right.Detail.PeriodCost)
+}
+
+func quotaResetChanged(previous, current int64) bool {
+	if previous < 0 || current < 0 {
+		return previous != current
+	}
+	return current > previous+resetCountdownJitterSec
 }
 
 func sortResultsByRecentChange(list []providers.Result, changedRounds map[string]uint64, configs []config.ProviderConfig) []providers.Result {

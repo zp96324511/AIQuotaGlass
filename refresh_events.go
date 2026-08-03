@@ -23,11 +23,14 @@ type usageUpdateEvent struct {
 }
 
 // usageCompleteEvent commits the order only after all providers finish.
+// ChangedAt carries each provider's last quota-change time (unix seconds) so
+// the widget can show the recent-activity label next to the account name.
 type usageCompleteEvent struct {
-	ConfigVersion      uint64   `json:"configVersion"`
-	RoundID            uint64   `json:"roundId"`
-	ChangedProviderIDs []string `json:"changedProviderIds"`
-	ProviderIDs        []string `json:"providerIds"`
+	ConfigVersion      uint64           `json:"configVersion"`
+	RoundID            uint64           `json:"roundId"`
+	ChangedProviderIDs []string         `json:"changedProviderIds"`
+	ProviderIDs        []string         `json:"providerIds"`
+	ChangedAt          map[string]int64 `json:"changedAt,omitempty"`
 }
 
 type configSavedEvent struct {

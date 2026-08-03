@@ -11,13 +11,13 @@ import (
 
 // WindowStatus is the quota state of a single usage window (5h/weekly/monthly).
 type WindowStatus struct {
-	Key        string  `json:"key"`        // "5h", "weekly", "monthly"
-	Label      string  `json:"label"`      // human readable label
-	Percent    float64 `json:"percent"`    // 0..100 usage of the limit; -1 = unlimited (UI shows 无限)
-	Used       float64 `json:"used"`       // raw consumed quota; Total=0 means unavailable
-	Total      float64 `json:"total"`      // raw quota limit; 0 means unavailable
-	ResetInSec int64   `json:"resetInSec"` // seconds until the window resets; -1 = no auto reset (countdown hidden)
-	Status     string  `json:"status"`     // "ok" or error marker
+	Key        string  `json:"key"`            // "5h", "weekly", "monthly"
+	Label      string  `json:"label"`          // human readable label
+	Percent    float64 `json:"percent"`        // 0..100 usage of the limit; -1 = unlimited (UI shows 无限)
+	Used       float64 `json:"used"`           // raw consumed quota; Total=0 means unavailable
+	Total      float64 `json:"total"`          // raw quota limit; 0 means unavailable
+	ResetInSec int64   `json:"resetInSec"`     // seconds until the window resets; -1 = no auto reset (countdown hidden)
+	Status     string  `json:"status"`         // "ok" or error marker
 	Unit       string  `json:"unit,omitempty"` // currency of Used/Total, e.g. "CNY", "USD" (balance windows)
 }
 
@@ -38,8 +38,31 @@ type UsageDetail struct {
 	RateMultiplier float64 `json:"rateMultiplier,omitempty"` // effective billing multiplier (incl. peak)
 	PeakActive     bool    `json:"peakActive,omitempty"`     // peak-rate window is currently active
 	// ExpiresAt/ExpiresInSec carry the key/subscription expiry.
-	ExpiresAt    string `json:"expiresAt,omitempty"`    // "2006-01-02"; empty = never expires
-	ExpiresInSec int64  `json:"expiresInSec,omitempty"` // seconds until expiry (>0)
+	ExpiresAt        string `json:"expiresAt,omitempty"`    // "2006-01-02"; empty = never expires
+	ExpiresInSec     int64  `json:"expiresInSec,omitempty"` // seconds until expiry (>0)
+	metricsAvailable bool
+}
+
+// MarkUsageMetricsAvailable marks detail metrics as successfully parsed.
+// The marker is internal and is not serialized to the frontend.
+func (d *UsageDetail) MarkUsageMetricsAvailable() {
+	d.metricsAvailable = true
+}
+
+// HasUsageMetrics reports whether activity metrics were successfully parsed.
+func (d UsageDetail) HasUsageMetrics() bool {
+	return d.metricsAvailable
+}
+
+// ErrorInfo carries structured details of a failed HTTP request so the card
+// can show the status code plus a response-body snippet and offer a "更多"
+// button that opens the request info modal. nil when the failure produced no
+// HTTP response (network error) or no useful payload.
+type ErrorInfo struct {
+	Method     string `json:"method,omitempty"` // HTTP method of the failing request
+	URL        string `json:"url,omitempty"`    // request URL (credentials live in headers, never here)
+	StatusCode int    `json:"statusCode"`       // HTTP status; 0 = no HTTP response
+	Body       string `json:"body,omitempty"`   // printable, truncated response-body snippet
 }
 
 // Result is the outcome of a single provider query.
@@ -47,9 +70,66 @@ type Result struct {
 	ProviderID   string         `json:"providerId"`
 	ProviderName string         `json:"providerName"`
 	Windows      []WindowStatus `json:"windows"`
-	Detail       UsageDetail    `json:"detail,omitempty"`
-	UpdatedAt    string         `json:"updatedAt"`       // local time "HH:MM:SS"
-	Error        string         `json:"error,omitempty"` // non-empty when the query failed
+	Detail       *UsageDetail   `json:"detail,omitempty"` // nil when optional detail is unavailable
+	UpdatedAt    string         `json:"updatedAt"`        // local time "HH:MM:SS"
+	Error        string         `json:"error,omitempty"`  // non-empty when the query failed
+	ErrorInfo    *ErrorInfo     `json:"errorInfo,omitempty"`
+}
+
+// httpErrorInfo builds the ErrorInfo for a failed HTTP response. Binary and
+// control characters are stripped from the body snippet so it renders safely
+// in the widget; method/url are recorded for the request-info modal.
+func httpErrorInfo(method, url string, status int, body []byte) *ErrorInfo {
+	return &ErrorInfo{
+		Method:     method,
+		URL:        url,
+		StatusCode: status,
+		Body:       truncatedErrorBody(body),
+	}
+}
+
+// truncatedErrorBody returns a printable, whitespace-compacted snippet of the
+// response body (max 500 chars) for inline error display, or "" when the body
+// is empty or has no printable content.
+func truncatedErrorBody(body []byte) string {
+	const max = 500
+	var b strings.Builder
+	b.Grow(len(body))
+	spacePending := false
+	escape := false
+	for _, c := range body {
+		if escape {
+			// ANSI escape sequence: skip until the terminating byte.
+			if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+				escape = false
+			}
+			continue
+		}
+		if c == 0x1b {
+			escape = true
+			continue
+		}
+		if c == '\n' || c == '\r' || c == '\t' {
+			spacePending = true
+			continue
+		}
+		if c < 0x20 || c == 0x7f {
+			continue // strip control characters
+		}
+		if spacePending && b.Len() > 0 && b.Len() < max {
+			b.WriteByte(' ')
+			spacePending = false
+		}
+		if b.Len() >= max {
+			break
+		}
+		b.WriteByte(c)
+	}
+	out := b.String()
+	if len(out) >= max {
+		out = out[:max] + "…"
+	}
+	return out
 }
 
 // Provider queries the usage of a single plan/API account.

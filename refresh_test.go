@@ -100,6 +100,12 @@ func TestCommitQuotaRound_groups_same_round_changes_and_keeps_tie_order(t *testi
 	if service.lastChangedRound["alpha"] != 7 || service.lastChangedRound["beta"] != 7 {
 		t.Fatalf("same-round changes = %+v, want alpha=7 and beta=7", service.lastChangedRound)
 	}
+	if first.ChangedAt["alpha"] <= 0 || first.ChangedAt["beta"] <= 0 {
+		t.Fatalf("changedAt must record unix seconds for changed providers, got %+v", first.ChangedAt)
+	}
+	if _, ok := first.ChangedAt["gamma"]; ok {
+		t.Fatalf("unchanged provider must not appear in changedAt, got %+v", first.ChangedAt)
+	}
 	if first.ConfigVersion != 3 || first.RoundID != 7 {
 		t.Fatalf("first event metadata = config %d, round %d; want config 3, round 7", first.ConfigVersion, first.RoundID)
 	}
@@ -118,6 +124,12 @@ func TestCommitQuotaRound_groups_same_round_changes_and_keeps_tie_order(t *testi
 
 	if service.lastChangedRound["alpha"] != 8 || service.lastChangedRound["beta"] != 7 {
 		t.Fatalf("cross-round changes = %+v, want alpha=8 and beta=7", service.lastChangedRound)
+	}
+	if second.ChangedAt["alpha"] < first.ChangedAt["alpha"] {
+		t.Fatalf("alpha changedAt must not go backwards: first %d, second %d", first.ChangedAt["alpha"], second.ChangedAt["alpha"])
+	}
+	if got, want := second.ChangedAt["beta"], first.ChangedAt["beta"]; got != want {
+		t.Fatalf("beta changedAt must stay stable across rounds: first %d, second %d", want, got)
 	}
 	if got, want := second.ProviderIDs, []string{"alpha", "beta", "gamma"}; !sameStrings(got, want) {
 		t.Fatalf("second provider order = %v, want %v", got, want)

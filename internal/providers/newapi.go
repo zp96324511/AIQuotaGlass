@@ -88,10 +88,12 @@ func (p *newAPI) Query(ctx context.Context) (*Result, error) {
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		res.Error = "API Key 无效或已过期"
+		res.ErrorInfo = httpErrorInfo(http.MethodGet, base+newAPIPath, resp.StatusCode, body)
 		return res, fmt.Errorf("new-api auth failed: HTTP %d", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		res.Error = fmt.Sprintf("查询失败: HTTP %d", resp.StatusCode)
+		res.ErrorInfo = httpErrorInfo(http.MethodGet, base+newAPIPath, resp.StatusCode, body)
 		return res, fmt.Errorf("new-api status %d", resp.StatusCode)
 	}
 
@@ -103,7 +105,7 @@ func (p *newAPI) Query(ctx context.Context) (*Result, error) {
 	res.Windows = windows
 	// Token expiry comes free with the same response; best-effort parse.
 	if d, err := parseNewAPIUsageDetail(body, time.Now()); err == nil {
-		res.Detail = d
+		res.Detail = &d
 	}
 	return res, nil
 }
@@ -117,8 +119,8 @@ func parseNewAPIQuota(body []byte, now time.Time) ([]WindowStatus, error) {
 		Code    bool   `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
-			TotalGranted   any `json:"total_granted"`
-			TotalAvailable any `json:"total_available"`
+			TotalGranted   any  `json:"total_granted"`
+			TotalAvailable any  `json:"total_available"`
 			UnlimitedQuota bool `json:"unlimited_quota"`
 		} `json:"data"`
 	}
