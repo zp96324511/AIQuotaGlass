@@ -806,7 +806,7 @@ function renderSettings() {
             <label class="check"><input type="checkbox" id="alwaysOnTop" ${cfg.alwaysOnTop ? "checked" : ""}/> 窗口置顶</label>
             <label>贴边展示账号
                 <select id="snapProvider">
-                    <option value="">自动(第一个账号)</option>
+                    <option value="">自动(最活跃账号)</option>
                     ${snapOpts}
                 </select>
             </label>

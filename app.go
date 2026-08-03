@@ -22,6 +22,8 @@ type windowControl interface {
 	SetPosition(x, y int)
 	Position() (x, y int)
 	SetSize(w, h int)
+	Size() (int, int)
+	OnResize(func(w, h int))
 	Quit()
 	Show()
 	Hide()
@@ -62,6 +64,9 @@ type AppService struct {
 
 	snapMu  sync.Mutex // serializes snap state with native window geometry changes
 	snapped string     // current edge the widget is docked to ("" = full size)
+
+	widgetW int // last user-set size while full-size (restored when unsnapping)
+	widgetH int
 }
 
 // setup wires the service to the running application.
@@ -80,6 +85,14 @@ func (s *AppService) setup(app *application.App, win windowControl) {
 	s.cfg = cloneAppConfig(cfg)
 	s.quotaSnapshots = map[string]quotaSnapshot{}
 	s.lastChangedRound = map[string]uint64{}
+	s.widgetW, s.widgetH = widgetWidth, widgetHeight
+	s.win.OnResize(func(w, h int) {
+		s.snapMu.Lock()
+		defer s.snapMu.Unlock()
+		if s.snapped == "" && w > 0 && h > 0 {
+			s.widgetW, s.widgetH = w, h
+		}
+	})
 	s.applyWindowState()
 
 	interval := time.Duration(cfg.RefreshIntervalSec) * time.Second
@@ -125,7 +138,7 @@ func (s *AppService) setSnapStateLocked(dir string) {
 	}
 	s.snapped = dir
 	if dir == "" {
-		s.win.SetSize(widgetWidth, widgetHeight)
+		s.win.SetSize(s.widgetW, s.widgetH)
 		s.app.Event.Emit("widget:snap", map[string]any{"dir": "", "providerID": ""})
 		return
 	}
@@ -155,20 +168,14 @@ func (s *AppService) setSnapStateLocked(dir string) {
 }
 
 // snapProviderID returns the account whose quota the edge bar shows. When no
-// account is explicitly chosen it falls back to the first one in list order
-// (which follows the user's SortOrder).
+// account is explicitly chosen it returns "" so the frontend picks the most
+// active provider (first card after dynamic sort).
 func (s *AppService) snapProviderID() string {
 	cfg := s.configSnapshot()
-	if cfg == nil {
+	if cfg == nil || cfg.SnapProviderID == "" {
 		return ""
 	}
-	if cfg.SnapProviderID != "" {
-		return cfg.SnapProviderID
-	}
-	if len(cfg.Providers) > 0 {
-		return cfg.Providers[0].ID
-	}
-	return ""
+	return cfg.SnapProviderID
 }
 
 // ---- Bindings exposed to the frontend ----

@@ -64,7 +64,7 @@ func (s *AppService) ExpandWidget() {
 		return
 	}
 	dir := s.snapped
-	expandWidgetGeometry(s.win, dir, edge.WorkAreaForWindow)
+	expandWidgetGeometry(s.win, dir, edge.WorkAreaForWindow, s.widgetW, s.widgetH)
 	s.snapped = ""
 	s.app.Event.Emit("widget:snap", map[string]any{"dir": "", "providerID": ""})
 }

@@ -14,7 +14,7 @@ type workArea struct {
 
 type workAreaLookup func(hwnd uintptr) (left, top, right, bottom int)
 
-func expandWidgetGeometry(win windowControl, dir string, lookup workAreaLookup) {
+func expandWidgetGeometry(win windowControl, dir string, lookup workAreaLookup, w, h int) {
 	var area workArea
 	hasArea := false
 	// Capture the monitor before widening the docked bar across a monitor boundary.
@@ -23,25 +23,25 @@ func expandWidgetGeometry(win windowControl, dir string, lookup workAreaLookup) 
 		area = workArea{left: left, top: top, right: right, bottom: bottom}
 		hasArea = true
 	}
-	win.SetSize(widgetWidth, widgetHeight)
+	win.SetSize(w, h)
 	x, y := win.Position()
 	position := widgetPosition{x: x, y: y}
 	if hasArea || dir == "left" || dir == "top" {
-		position = expandedWidgetPosition(dir, position, area)
+		position = expandedWidgetPosition(dir, position, area, w, h)
 	}
 	win.SetPosition(position.x, position.y)
 }
 
-func expandedWidgetPosition(dir string, position widgetPosition, area workArea) widgetPosition {
+func expandedWidgetPosition(dir string, position widgetPosition, area workArea, w, h int) widgetPosition {
 	switch dir {
 	case "left":
 		position.x += snapEscapeStep
 	case "top":
 		position.y += snapEscapeStep
 	case "right":
-		position.x = area.right - widgetWidth - snapEscapeStep
+		position.x = area.right - w - snapEscapeStep
 	case "bottom":
-		position.y = area.bottom - widgetHeight - snapEscapeStep
+		position.y = area.bottom - h - snapEscapeStep
 	}
 	return position
 }
