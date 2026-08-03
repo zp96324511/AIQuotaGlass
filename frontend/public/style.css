@@ -325,6 +325,19 @@ label.check input { width: auto; }
     gap: 8px;
     margin-top: 8px;
 }
+.fields .type-row .row-label {
+    white-space: nowrap;
+    min-width: 52px;
+    flex-shrink: 0;
+}
+.fields .type-row input[type="number"] {
+    width: 64px;
+    flex-shrink: 0;
+}
+.fields .type-row .check {
+    white-space: nowrap;
+    margin-left: auto;
+}
 .fields .type-row select {
     flex: 1;
     min-width: 0;

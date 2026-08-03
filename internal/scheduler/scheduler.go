@@ -9,11 +9,13 @@ import (
 // Scheduler runs a tick function at a configurable interval.
 // It never runs two ticks concurrently and can be stopped/resumed.
 type Scheduler struct {
-	mu       sync.Mutex
-	tick     func(context.Context)
-	interval time.Duration
-	cancel   context.CancelFunc
-	running  bool
+	mu         sync.Mutex
+	tickMu     sync.Mutex
+	tick       func(context.Context)
+	interval   time.Duration
+	cancel     context.CancelFunc
+	running    bool
+	generation uint64
 }
 
 // New creates a scheduler with the given tick callback.
@@ -36,15 +38,19 @@ func (s *Scheduler) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.running = true
+	s.generation++
+	generation := s.generation
 	go func() {
 		for {
+			s.mu.Lock()
 			interval := s.interval
+			s.mu.Unlock()
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(interval):
 			}
-			s.runOnce(ctx)
+			s.runOnce(ctx, generation)
 		}
 	}()
 }
@@ -53,12 +59,28 @@ func (s *Scheduler) Start() {
 func (s *Scheduler) RunNow() {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	s.runOnce(ctx)
+	s.mu.Lock()
+	running := s.running
+	generation := s.generation
+	s.mu.Unlock()
+	if !running {
+		return
+	}
+	s.runOnce(ctx, generation)
 }
 
-func (s *Scheduler) runOnce(ctx context.Context) {
+func (s *Scheduler) runOnce(ctx context.Context, generation uint64) {
 	s.mu.Lock()
-	if !s.running {
+	if !s.running || generation != s.generation {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+
+	s.tickMu.Lock()
+	defer s.tickMu.Unlock()
+	s.mu.Lock()
+	if !s.running || generation != s.generation {
 		s.mu.Unlock()
 		return
 	}

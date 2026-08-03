@@ -1,5 +1,8 @@
 import { AppService } from "../bindings/aiquotaglass";
 import { Events } from "@wailsio/runtime";
+import type { AppConfig as BindingAppConfig } from "../bindings/aiquotaglass/internal/config/models";
+import type { ProviderType as BindingProviderType } from "../bindings/aiquotaglass/internal/providers/models";
+import type { Result as BindingResult } from "../bindings/aiquotaglass/internal/providers/models";
 
 // ---------------------------------------------------------------------------
 // Types (mirror of the Go bindings)
@@ -34,6 +37,22 @@ interface ProviderResult {
     updatedAt: string;
     error?: string;
 }
+interface UsageLoadingEvent {
+    configVersion: number;
+    roundId: number;
+    providerIds: string[];
+}
+interface UsageUpdateEvent {
+    configVersion: number;
+    roundId: number;
+    results: ProviderResult[];
+}
+interface UsageCompleteEvent {
+    configVersion: number;
+    roundId: number;
+    changedProviderIds: string[];
+    providerIds: string[];
+}
 interface ProviderConfig {
     id: string;
     name: string;
@@ -44,6 +63,7 @@ interface ProviderConfig {
     alertThresholds: Record<string, number>;
     detail?: { showUsageDetail?: boolean; international?: boolean };
     sortOrder?: number;
+    dynamicSort?: boolean;
 }
 interface AppConfig {
     refreshIntervalSec: number;
@@ -54,6 +74,15 @@ interface AppConfig {
     snapProviderID?: string;
     providers: ProviderConfig[];
 }
+interface ConfigSavedEvent {
+    version: number;
+    roundId: number;
+    config: BindingAppConfig;
+}
+type PendingUsageEvent =
+    | { kind: "loading"; payload: UsageLoadingEvent }
+    | { kind: "update"; payload: UsageUpdateEvent }
+    | { kind: "complete"; payload: UsageCompleteEvent };
 interface ProviderType {
     type: string;
     name: string;
@@ -82,6 +111,12 @@ let draft: AppConfig | null = null; // editable copy while the settings popup is
 let providerTypes: ProviderType[] = []; // registered (coded) provider adapters
 let snapProvider = ""; // provider shown by the edge-docked bar (from widget:snap)
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
+let activeRoundId = 0;
+let latestCompletedRoundId = 0;
+let latestConfigVersion = 0;
+let widgetReady = false;
+const pendingUsageEvents = new Map<number, PendingUsageEvent[]>();
+let committedOrder: string[] = [];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 // ---------------------------------------------------------------------------
@@ -231,7 +266,190 @@ function orderOf(id: string): number {
 }
 
 function sortResults(list: ProviderResult[]): ProviderResult[] {
-    return [...list].sort((a, b) => orderOf(a.providerId) - orderOf(b.providerId));
+    const committed = new Map(committedOrder.map((id, index) => [id, index]));
+    return [...list].sort((a, b) => {
+        const aCommitted = committed.get(a.providerId);
+        const bCommitted = committed.get(b.providerId);
+        if (aCommitted !== undefined && bCommitted !== undefined) {
+            return aCommitted - bCommitted;
+        }
+        if (aCommitted !== undefined) return -1;
+        if (bCommitted !== undefined) return 1;
+        return orderOf(a.providerId) - orderOf(b.providerId);
+    });
+}
+
+function commitProviderOrder(providerIds: string[]) {
+    committedOrder = [...providerIds];
+    const rank = new Map(providerIds.map((id, index) => [id, index]));
+    results = results.filter(r => rank.has(r.providerId)).sort((a, b) => {
+        const aRank = rank.get(a.providerId) ?? Number.MAX_SAFE_INTEGER;
+        const bRank = rank.get(b.providerId) ?? Number.MAX_SAFE_INTEGER;
+        return aRank - bRank;
+    });
+}
+
+function acceptRefreshSnapshot(snapshot: ProviderResult[]) {
+    results = snapshot;
+    committedOrder = snapshot.map(r => r.providerId);
+}
+
+function normalizeConfig(raw: BindingAppConfig | null): AppConfig {
+    if (!raw) return defaultConfig();
+    return {
+        refreshIntervalSec: raw.refreshIntervalSec,
+        nativeNotify: raw.nativeNotify,
+        edgeDock: raw.edgeDock,
+        alwaysOnTop: raw.alwaysOnTop,
+        opacity: raw.opacity,
+        snapProviderID: raw.snapProviderID,
+        providers: (raw.providers ?? []).map(p => ({
+            id: p.id,
+            name: p.name,
+            type: p.type,
+            enabled: p.enabled,
+            workspace: p.workspace,
+            cookie: p.cookie,
+            alertThresholds: Object.fromEntries(
+                Object.entries(p.alertThresholds ?? {}).filter((entry): entry is [string, number] => typeof entry[1] === "number"),
+            ),
+            detail: p.detail,
+            sortOrder: p.sortOrder,
+            dynamicSort: p.dynamicSort !== false,
+        })),
+    };
+}
+
+function toBindingConfig(cfg: AppConfig): BindingAppConfig {
+    return {
+        refreshIntervalSec: cfg.refreshIntervalSec,
+        nativeNotify: cfg.nativeNotify,
+        edgeDock: cfg.edgeDock,
+        alwaysOnTop: cfg.alwaysOnTop,
+        opacity: cfg.opacity,
+        snapProviderID: cfg.snapProviderID ?? "",
+        providers: cfg.providers.map(p => ({
+            id: p.id,
+            name: p.name,
+            type: p.type,
+            enabled: p.enabled,
+            workspace: p.workspace,
+            cookie: p.cookie,
+            alertThresholds: p.alertThresholds,
+            detail: p.detail,
+            sortOrder: p.sortOrder ?? 0,
+            dynamicSort: p.dynamicSort !== false,
+        })),
+    };
+}
+
+function normalizeResults(raw: BindingResult[] | null): ProviderResult[] {
+    return (raw ?? []).map(r => ({
+        providerId: r.providerId,
+        providerName: r.providerName,
+        windows: r.windows ?? [],
+        detail: r.detail,
+        updatedAt: r.updatedAt,
+        error: r.error,
+    }));
+}
+
+function normalizeProviderTypes(raw: BindingProviderType[] | null): ProviderType[] {
+    return (raw ?? []).map(t => ({
+        type: t.type,
+        name: t.name,
+        description: t.description,
+        fields: t.fields ?? [],
+        windowKeys: t.windowKeys ?? [],
+    }));
+}
+
+function queueUsageEvent(event: PendingUsageEvent) {
+    const version = event.payload.configVersion;
+    const events = pendingUsageEvents.get(version) ?? [];
+    events.push(event);
+    pendingUsageEvents.set(version, events);
+}
+
+function acceptUsageVersion(configVersion: number): boolean {
+    if (configVersion < latestConfigVersion) return false;
+    if (configVersion > latestConfigVersion) return false;
+    return true;
+}
+
+function handleUsageLoading(payload: UsageLoadingEvent) {
+    if (!acceptUsageVersion(payload.configVersion)) {
+        if (payload.configVersion > latestConfigVersion) queueUsageEvent({ kind: "loading", payload });
+        return;
+    }
+    if (!widgetReady) {
+        queueUsageEvent({ kind: "loading", payload });
+        return;
+    }
+    if (payload.roundId < activeRoundId) return;
+    activeRoundId = payload.roundId;
+    for (const id of payload.providerIds) {
+        if (results.some(x => x.providerId === id)) continue;
+        if ($<HTMLDivElement>("providerList").querySelector(`[data-provider-id="${cssEsc(id)}"]`)) continue;
+        insertCardAt(loadingCardHTML(id), id);
+    }
+}
+
+function handleUsageUpdate(payload: UsageUpdateEvent) {
+    if (!acceptUsageVersion(payload.configVersion)) {
+        if (payload.configVersion > latestConfigVersion) queueUsageEvent({ kind: "update", payload });
+        return;
+    }
+    if (!widgetReady) {
+        queueUsageEvent({ kind: "update", payload });
+        return;
+    }
+    if (payload.roundId < activeRoundId) return;
+    activeRoundId = payload.roundId;
+    for (const r of payload.results) upsertProvider(r);
+    if (payload.roundId <= latestCompletedRoundId) render();
+    updateSnapBar();
+}
+
+function handleUsageComplete(payload: UsageCompleteEvent) {
+    if (!acceptUsageVersion(payload.configVersion)) {
+        if (payload.configVersion > latestConfigVersion) queueUsageEvent({ kind: "complete", payload });
+        return;
+    }
+    if (!widgetReady) {
+        queueUsageEvent({ kind: "complete", payload });
+        return;
+    }
+    if (payload.roundId < activeRoundId || payload.roundId < latestCompletedRoundId) return;
+    activeRoundId = payload.roundId;
+    latestCompletedRoundId = payload.roundId;
+    commitProviderOrder(payload.providerIds);
+    render();
+    updateSnapBar();
+}
+
+function flushUsageEvents(configVersion: number) {
+    const events = pendingUsageEvents.get(configVersion) ?? [];
+    pendingUsageEvents.delete(configVersion);
+    for (const event of events) {
+        switch (event.kind) {
+            case "loading":
+                handleUsageLoading(event.payload);
+                break;
+            case "update":
+                handleUsageUpdate(event.payload);
+                break;
+            case "complete":
+                handleUsageComplete(event.payload);
+                break;
+            default:
+                assertNever(event);
+        }
+    }
+}
+
+function assertNever(value: never): never {
+    throw new Error(`Unknown usage event: ${JSON.stringify(value)}`);
 }
 
 function render() {
@@ -464,7 +682,11 @@ function renderSettings() {
             </summary>
             <div class="fields">
                 <input type="hidden" id="id_${i}" value="${escapeHtml(p.id)}"/>
-                <label class="type-row">排序号 <input type="number" id="sort_${i}" min="0" value="${p.sortOrder ?? i}"/></label>
+                <div class="type-row">
+                    <span class="row-label">排序号</span>
+                    <input type="number" id="sort_${i}" min="0" value="${p.sortOrder ?? i}"/>
+                    <label class="check"><input type="checkbox" id="ds_${i}" ${p.dynamicSort !== false ? "checked" : ""}/> 动态排序</label>
+                </div>
                 <label class="type-row">厂商类型
                     <select id="type_${i}">${typesOpts}</select>
                 </label>
@@ -536,6 +758,7 @@ function readProviderFromDom(i: number): ProviderConfig {
         alertThresholds: thresholds,
         detail: {},
         sortOrder: sortRaw === "" ? i : clampInt(sortRaw, 0, 9999),
+        dynamicSort: $<HTMLInputElement>(`ds_${i}`)?.checked ?? true,
     };
     fieldsFor(type).forEach(f => {
         if (!isValueField(f)) return;
@@ -593,6 +816,7 @@ function addProvider() {
         alertThresholds: thresholds,
         detail: {},
         sortOrder: draft.providers.length,
+        dynamicSort: true,
     });
     renderSettings();
 }
@@ -655,7 +879,7 @@ async function initSettings() {
     $<HTMLDivElement>("widget").classList.add("hidden");
     $<HTMLDivElement>("settingsWin").classList.remove("hidden");
     try {
-        providerTypes = (await AppService.GetProviderTypes()) ?? [];
+        providerTypes = normalizeProviderTypes(await AppService.GetProviderTypes());
     } catch (e) {
         console.error(e);
         providerTypes = [];
@@ -682,7 +906,7 @@ async function initSettings() {
         const cfg = collectConfig();
         if (!cfg) return;
         try {
-            await AppService.SaveConfig(cfg);
+            await AppService.SaveConfig(toBindingConfig(cfg));
             currentConfig = cfg;
             toast("已保存");
             AppService.CloseSettings();
@@ -696,7 +920,12 @@ function initWidget() {
     render();
 
     $<HTMLButtonElement>("btnRefresh").addEventListener("click", () => {
-        AppService.RefreshAll().then(res => { results = sortResults(res); render(); }).catch(e => toast("刷新失败: " + e));
+        const requestedConfigVersion = latestConfigVersion;
+        AppService.RefreshAll().then(res => {
+            if (requestedConfigVersion !== latestConfigVersion) return;
+            acceptRefreshSnapshot(normalizeResults(res));
+            render();
+        }).catch(e => toast("刷新失败: " + e));
     });
     $<HTMLButtonElement>("btnSettings").addEventListener("click", () => AppService.OpenSettings());
     $<HTMLButtonElement>("btnClose").addEventListener("click", () => AppService.HideToTray());
@@ -707,19 +936,6 @@ function initWidget() {
     // Click on the docked bar -> expand back to the full widget
     $<HTMLDivElement>("snapBar").addEventListener("click", () => AppService.ExpandWidget());
 
-    Events.On("usage:loading", (e: any) => {
-        const ids = e.data as string[];
-        for (const id of ids) {
-            if (results.some(x => x.providerId === id)) continue;
-            if ($<HTMLDivElement>("providerList").querySelector(`[data-provider-id="${cssEsc(id)}"]`)) continue;
-            insertCardAt(loadingCardHTML(id), id);
-        }
-    });
-    Events.On("usage:update", (e: any) => {
-        const list = e.data as ProviderResult[];
-        for (const r of list) upsertProvider(r);
-        updateSnapBar();
-    });
     Events.On("widget:snap", (e: any) => {
         const d = e.data as { dir: string; providerID: string };
         applySnapMode(d.dir, d.providerID ?? "");
@@ -731,8 +947,34 @@ function initWidget() {
 }
 
 async function init() {
+    if (!isSettings) {
+        Events.On("usage:loading", (e: any) => handleUsageLoading(e.data as UsageLoadingEvent));
+        Events.On("usage:update", (e: any) => handleUsageUpdate(e.data as UsageUpdateEvent));
+        Events.On("usage:complete", (e: any) => handleUsageComplete(e.data as UsageCompleteEvent));
+    }
+    Events.On("config:saved", (e: any) => {
+        const payload = e.data as ConfigSavedEvent;
+        if (payload.version <= latestConfigVersion) return;
+        latestConfigVersion = payload.version;
+
+        pendingUsageEvents.forEach((_, version) => {
+            if (version < payload.version) pendingUsageEvents.delete(version);
+        });
+        currentConfig = normalizeConfig(payload.config);
+        snapProvider = currentConfig.snapProviderID ?? "";
+        results = [];
+        committedOrder = [];
+        activeRoundId = Math.max(activeRoundId, payload.roundId + 1);
+        latestCompletedRoundId = Math.max(latestCompletedRoundId, payload.roundId);
+        applyOpacity();
+        render();
+        updateSnapBar();
+        if (widgetReady) flushUsageEvents(payload.version);
+    });
+
     try {
-        currentConfig = await AppService.GetConfig();
+        const fetchedConfig = await AppService.GetConfig();
+        if (latestConfigVersion === 0) currentConfig = normalizeConfig(fetchedConfig);
     } catch (e) {
         console.error(e);
         currentConfig = null;
@@ -743,19 +985,15 @@ async function init() {
         initSettings();
     } else {
         initWidget();
+        widgetReady = true;
+        flushUsageEvents(latestConfigVersion);
+        const requestedConfigVersion = latestConfigVersion;
         const res = await AppService.RefreshAll();
-        results = sortResults(res);
-        render();
+        if (requestedConfigVersion === latestConfigVersion) {
+            acceptRefreshSnapshot(normalizeResults(res));
+            render();
+        }
     }
-
-    Events.On("config:saved", (e: any) => {
-        currentConfig = e.data as AppConfig;
-        applyOpacity();
-        // Rebuild panels so SortOrder changes take effect immediately instead
-        // of waiting for the next app start.
-        render();
-        updateSnapBar();
-    });
 }
 
 init();

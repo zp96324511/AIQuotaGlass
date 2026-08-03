@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"aiquotaglass/internal/config"
 	"aiquotaglass/internal/edge"
-	"aiquotaglass/internal/notify"
 	"aiquotaglass/internal/providers"
 	"aiquotaglass/internal/scheduler"
 )
@@ -55,6 +53,12 @@ type AppService struct {
 	lastStatus []providers.Result
 	alertArmed map[string]bool // providerID/windowKey -> currently above threshold
 
+	refreshMu        sync.Mutex
+	refreshRound     uint64
+	configVersion    uint64
+	quotaSnapshots   map[string]quotaSnapshot
+	lastChangedRound map[string]uint64
+
 	snapMu  sync.Mutex // serializes snap state with native window geometry changes
 	snapped string     // current edge the widget is docked to ("" = full size)
 }
@@ -69,128 +73,29 @@ func (s *AppService) setup(app *application.App, win windowControl) {
 	if err != nil {
 		log.Printf("config: %v", err)
 	}
-	s.cfg = cfg
-	if s.cfg == nil {
-		s.cfg = config.Default()
+	if cfg == nil {
+		cfg = config.Default()
 	}
+	s.cfg = cloneAppConfig(cfg)
+	s.quotaSnapshots = map[string]quotaSnapshot{}
+	s.lastChangedRound = map[string]uint64{}
 	s.applyWindowState()
 
-	interval := time.Duration(s.cfg.RefreshIntervalSec) * time.Second
+	interval := time.Duration(cfg.RefreshIntervalSec) * time.Second
 	s.sched = scheduler.New(interval, s.refresh)
 	s.sched.Start()
 
 	go s.edgeDockLoop()
 }
 
-// refresh queries every enabled provider in parallel. It first announces the
-// accounts being refreshed (usage:loading) so the UI can reserve panels, then
-// each provider emits its own incremental usage:update event as soon as it
-// finishes (panels render independently instead of waiting for the slowest
-// account). The call itself blocks until all providers finish so synchronous
-// callers such as RefreshAll always return a complete snapshot.
-func (s *AppService) refresh(ctx context.Context) {
-	ids := make([]string, 0, len(s.cfg.Providers))
-	for i := range s.cfg.Providers {
-		pc := s.cfg.Providers[i]
-		if !pc.Enabled {
-			continue
-		}
-		ids = append(ids, pc.ID)
-	}
-	if len(ids) > 0 {
-		s.app.Event.Emit("usage:loading", ids)
-	}
-
-	var wg sync.WaitGroup
-	for i := range s.cfg.Providers {
-		pc := s.cfg.Providers[i]
-		if !pc.Enabled {
-			continue
-		}
-		wg.Add(1)
-		go func(pc config.ProviderConfig) {
-			defer wg.Done()
-			p, err := providers.New(pc)
-			if err != nil {
-				return
-			}
-			res, err := p.Query(ctx)
-			if err != nil {
-				log.Printf("query %s: %v", pc.ID, err)
-				// Report the failure like a result so its panel (or the reserved
-				// loading slot) is replaced with a visible error instead of
-				// showing stale data or spinning forever.
-				res = &providers.Result{
-					ProviderID:   pc.ID,
-					ProviderName: p.Name(),
-					Error:        err.Error(),
-					UpdatedAt:    time.Now().Format("15:04:05"),
-				}
-			}
-			if res == nil {
-				return
-			}
-			s.checkAlerts(res)
-
-			s.mu.Lock()
-			s.lastStatus = upsertResult(s.lastStatus, *res)
-			s.mu.Unlock()
-			s.app.Event.Emit("usage:update", []providers.Result{*res})
-		}(pc)
-	}
-	wg.Wait()
-}
-
-// upsertResult replaces the entry for r.ProviderID or appends it.
-func upsertResult(list []providers.Result, r providers.Result) []providers.Result {
-	for i := range list {
-		if list[i].ProviderID == r.ProviderID {
-			list[i] = r
-			return list
-		}
-	}
-	return append(list, r)
-}
-
-func (s *AppService) checkAlerts(res *providers.Result) {
-	if res.Error != "" || s.cfg == nil {
-		return
-	}
-	cfg := config.Get()
-	for i := range res.Windows {
-		w := res.Windows[i]
-		p := cfg.ProviderConfig(res.ProviderID)
-		threshold, ok := p.AlertThresholds[w.Key]
-		if !ok {
-			continue
-		}
-		key := res.ProviderID + "/" + w.Key
-		above := w.Percent >= float64(threshold)
-		s.mu.Lock()
-		armed := s.alertArmed[key]
-		s.alertArmed[key] = above
-		s.mu.Unlock()
-		if above && !armed {
-			msg := alertMessage(p.Name, w, threshold)
-			s.app.Event.Emit("usage:alert", map[string]any{
-				"provider": p.Name, "window": w.Label, "percent": w.Percent, "threshold": threshold,
-			})
-			if cfg.NativeNotify {
-				notify.Show("AIQuotaGlass 用量告警", msg)
-			}
-		}
-	}
-}
-
-func alertMessage(name string, w providers.WindowStatus, threshold int) string {
-	return name + " " + w.Label + " 用量已达 " + formatPercent(w.Percent) + " (阈值 " + strconv.Itoa(threshold) + "%)"
-}
-
 func (s *AppService) applyWindowState() {
 	if s.win == nil {
 		return
 	}
-	s.win.SetAlwaysOnTop(s.cfg.AlwaysOnTop)
+	s.mu.Lock()
+	on := s.cfg != nil && s.cfg.AlwaysOnTop
+	s.mu.Unlock()
+	s.win.SetAlwaysOnTop(on)
 }
 
 // edgeDockLoop continuously snaps the window to screen edges when enabled.
@@ -200,7 +105,7 @@ func (s *AppService) edgeDockLoop() {
 	t := time.NewTicker(800 * time.Millisecond)
 	defer t.Stop()
 	for range t.C {
-		cfg := config.Get()
+		cfg := s.configSnapshot()
 		if cfg == nil || !cfg.EdgeDock || s.win == nil {
 			continue
 		}
@@ -252,7 +157,7 @@ func (s *AppService) setSnapStateLocked(dir string) {
 // account is explicitly chosen it falls back to the first one in list order
 // (which follows the user's SortOrder).
 func (s *AppService) snapProviderID() string {
-	cfg := config.Get()
+	cfg := s.configSnapshot()
 	if cfg == nil {
 		return ""
 	}
@@ -269,11 +174,7 @@ func (s *AppService) snapProviderID() string {
 
 // GetConfig returns the current configuration.
 func (s *AppService) GetConfig() *config.AppConfig {
-	cfg, _ := config.Load()
-	if cfg == nil {
-		cfg = config.Default()
-	}
-	return cfg
+	return s.configSnapshot()
 }
 
 // GetProviderTypes returns the provider types that have a coded adapter
@@ -287,10 +188,21 @@ func (s *AppService) SaveConfig(cfg *config.AppConfig) error {
 	if cfg == nil {
 		cfg = config.Default()
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
-	s.cfg = cfg
+	s.mu.Lock()
+	s.configVersion++
+	s.cfg = cloneAppConfig(cfg)
+	s.lastStatus = nil
+	s.quotaSnapshots = map[string]quotaSnapshot{}
+	s.lastChangedRound = map[string]uint64{}
+	savedCfg := cloneAppConfig(s.cfg)
+	configVersion := s.configVersion
+	barrierRoundID := s.refreshRound
+	s.mu.Unlock()
 	s.applyWindowState()
 	if s.sched != nil {
 		interval := time.Duration(cfg.RefreshIntervalSec) * time.Second
@@ -299,8 +211,12 @@ func (s *AppService) SaveConfig(cfg *config.AppConfig) error {
 		}
 		s.sched.SetInterval(interval)
 	}
+	s.app.Event.Emit("config:saved", configSavedEvent{
+		Version: configVersion,
+		RoundID: barrierRoundID,
+		Config:  savedCfg,
+	})
 	go s.refresh(context.Background())
-	s.app.Event.Emit("config:saved", cfg)
 	return nil
 }
 
@@ -309,107 +225,17 @@ func (s *AppService) RefreshAll() []providers.Result {
 	s.sched.RunNow()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.lastStatus
+	return append([]providers.Result(nil), s.lastStatus...)
 }
 
 // SetAlwaysOnTop toggles window pinning.
 func (s *AppService) SetAlwaysOnTop(on bool) {
-	s.cfg.AlwaysOnTop = on
+	s.mu.Lock()
+	if s.cfg != nil {
+		s.cfg.AlwaysOnTop = on
+	}
+	s.mu.Unlock()
 	s.win.SetAlwaysOnTop(on)
-}
-
-// OpenSettings opens the settings popup window, focusing it if already open.
-// The window hosts the same frontend with the "?settings=1" view mode.
-func (s *AppService) OpenSettings() {
-	if s.settingsWin != nil {
-		s.settingsWin.Show()
-		s.settingsWin.Focus()
-		return
-	}
-		w := s.app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Name:                "settings",
-			Title:               "AIQuotaGlass 设置",
-			Width:               460,
-			Height:              640,
-			Frameless:           true,
-			AlwaysOnTop:         true,
-			DisableResize:       true,
-			MinimiseButtonState: application.ButtonHidden,
-			MaximiseButtonState: application.ButtonHidden,
-			CloseButtonState:    application.ButtonHidden,
-			BackgroundType:      application.BackgroundTypeSolid,
-			BackgroundColour:    application.NewRGBA(24, 26, 36, 255),
-			Windows:          application.WindowsWindow{DisableFramelessWindowDecorations: true},
-			URL:              "/?settings=1",
-		})
-	s.settingsWin = w
-	w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
-		s.settingsWin = nil
-	})
-}
-
-// CloseSettings closes the settings popup window if it is open.
-func (s *AppService) CloseSettings() {
-	if s.settingsWin != nil {
-		s.settingsWin.Close()
-		s.settingsWin = nil
-	}
-}
-
-// SnapIfNearEdge triggers one edge-snap pass (used on drag release).
-func (s *AppService) SnapIfNearEdge() {
-	if s.win != nil && s.win.NativeHandle() != 0 {
-		s.snapMu.Lock()
-		s.setSnapStateLocked(snap(s.win.NativeHandle(), true))
-		s.snapMu.Unlock()
-	}
-}
-
-// ExpandWidget restores the widget to its full size and pushes it away from
-// the docked edge so the snap loop does not collapse it again immediately.
-func (s *AppService) ExpandWidget() {
-	s.snapMu.Lock()
-	defer s.snapMu.Unlock()
-	if s.win == nil {
-		return
-	}
-	dir := s.snapped
-	expandWidgetGeometry(s.win, dir, edge.WorkAreaForWindow)
-	s.snapped = ""
-	s.app.Event.Emit("widget:snap", map[string]any{"dir": "", "providerID": ""})
-}
-
-// ShowMainWindow restores and focuses the widget window (tray click / menu).
-func (s *AppService) ShowMainWindow() {
-	if s.win == nil {
-		return
-	}
-	s.win.Show()
-	s.win.Focus()
-}
-
-// HideToTray hides the widget window instead of quitting; it stays alive in
-// the system tray and keeps refreshing in the background.
-func (s *AppService) HideToTray() {
-	if s.win == nil {
-		return
-	}
-	s.win.Hide()
-}
-
-// Quit shuts the application down.
-func (s *AppService) Quit() {
-	if s.sched != nil {
-		s.sched.Stop()
-	}
-	s.win.Quit()
-}
-
-// TestNotify fires a sample notification (settings preview).
-// It always fires regardless of the NativeNotify toggle so users can verify
-// the notification channel works before enabling automatic alerts.
-func (s *AppService) TestNotify() error {
-	return notify.ShowE("AIQuotaGlass", "告警通知测试")
 }
 
 func formatPercent(f float64) string {

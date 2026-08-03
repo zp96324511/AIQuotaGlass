@@ -12,15 +12,16 @@ import (
 
 // ProviderConfig describes a single quota/plan provider instance.
 type ProviderConfig struct {
-	ID              string            `json:"id"`                  // stable identifier, e.g. "opencode-go"
-	Name            string            `json:"name"`                // display name
-	Type            string            `json:"type"`                // provider type, e.g. "opencode-go"
-	Enabled         bool              `json:"enabled"`             // whether to query on refresh
-	Workspace       string            `json:"workspace,omitempty"` // e.g. wrk_...
-	Cookie          string            `json:"cookie,omitempty"`    // session cookie (encrypted on disk, plaintext in memory)
-	AlertThresholds map[string]int    `json:"alertThresholds"`     // window key -> percent threshold
-	Detail          ProviderDetailCfg `json:"detail,omitempty"`    // optional extended fields
-	SortOrder       int               `json:"sortOrder"`           // lower sorts first in the list and snap default
+	ID              string            `json:"id"`                    // stable identifier, e.g. "opencode-go"
+	Name            string            `json:"name"`                  // display name
+	Type            string            `json:"type"`                  // provider type, e.g. "opencode-go"
+	Enabled         bool              `json:"enabled"`               // whether to query on refresh
+	Workspace       string            `json:"workspace,omitempty"`   // e.g. wrk_...
+	Cookie          string            `json:"cookie,omitempty"`      // session cookie (encrypted on disk, plaintext in memory)
+	AlertThresholds map[string]int    `json:"alertThresholds"`       // window key -> percent threshold
+	Detail          ProviderDetailCfg `json:"detail,omitempty"`      // optional extended fields
+	SortOrder       int               `json:"sortOrder"`             // lower sorts first in the list and snap default
+	DynamicSort     *bool             `json:"dynamicSort,omitempty"` // sort by recent quota change; nil = enabled
 }
 
 // ProviderDetailCfg holds provider specific knobs.
@@ -59,6 +60,7 @@ func Default() *AppConfig {
 					"weekly":  80,
 					"monthly": 80,
 				},
+				DynamicSort: boolPtr(true),
 			},
 		},
 		// No default thresholds for other provider types — the settings UI
@@ -186,4 +188,8 @@ func clone(cfg *AppConfig) *AppConfig {
 // their relative order.
 func sortByOrder(ps []ProviderConfig) {
 	sort.SliceStable(ps, func(i, j int) bool { return ps[i].SortOrder < ps[j].SortOrder })
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }

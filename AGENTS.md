@@ -46,7 +46,7 @@ frontend/                   玻璃拟态 UI;src/main.ts 双窗口模式,public/s
 
 - **Wails 绑定**:只有 `AppService` 的**导出**方法进入 `frontend/bindings`。接口类型参数无法 JSON 序列化——`setup` 必须小写。新增绑定方法 = 导出方法,参数/返回值用可 JSON 类型。
 - **前端调用**:`import { AppService } from "../bindings/aiquotaglass"`(绑定是模块,不是类);事件用 `@wailsio/runtime` 的 `Events.On`。
-- **事件协议**(后端→前端):`usage:update`(ProviderResult[])、`usage:alert`({provider,window,percent,threshold})、`config:saved`(AppConfig)。
+- **事件协议**(后端→前端):`usage:loading`({configVersion,roundId,providerIds})、`usage:update`({configVersion,roundId,results})、`usage:complete`({configVersion,roundId,changedProviderIds,providerIds})、`usage:alert`({provider,window,percent,threshold})、`config:saved`({version,roundId,config})。`configVersion` 屏蔽配置切换前后的异步事件,`roundId` 丢弃旧轮次; 卡片位置只在 `usage:complete` 后按整轮额度变化排序。
 - **双窗口**:主窗口为悬浮小窗;`AppService.OpenSettings()` 懒创建设置弹窗(`URL: /?settings=1`),`CloseSettings()` 关闭。前端用 `location.search` 判断 `?settings=1` 进入设置模式(隐藏 widget、显示 `.settings-win`)。事件全局广播,两窗口都能收到。
 - **托盘/关闭行为**:主窗 ✕ 按钮 = `HideToTray()`(隐藏,进程驻留继续刷新);`WindowClosing` 钩子(RegisterHook)同样转隐藏并 `e.Cancel()`;真正的退出只有托盘菜单「退出」(或 `AppService.Quit()`)。必须保持 `Windows.DisableQuitOnLastWindowClosed: true` + `HiddenOnTaskbar`,否则隐藏/关窗会退出进程。托盘用 `app.SystemTray.New()` + `SetMenu`(显示窗口/刷新数据/退出),左键点击显示窗口。
 - **拖拽**:Wails v3 的 JS 拖拽机制,元素 CSS 设 `--wails-draggable: drag`,按钮等禁拖区设 `no-drag`。**不要用** `-webkit-app-region`(WebView2 不支持)。见 `drag.js`:`mousedown` 后 `mousemove` 触发 `invoke("wails:drag")` → 后端 `PostMessage(WM_NCLBUTTONDOWN, HTCAPTION)`。

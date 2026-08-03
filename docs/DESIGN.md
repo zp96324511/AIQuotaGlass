@@ -112,8 +112,8 @@ OS 专属代码全部 platform-tagged,业务层通过接口解耦:
 - 缓存命中率 = ΣcacheRead / (ΣcacheRead + Σinput)
 
 ### 4.4 internal/scheduler
-- 简单 ticker,防重入:`Start/Stop/SetInterval/RunNow`;单次 tick 超时 60s
-- tick 回调 = `refresh(ctx)`:遍历启用厂商并行(当前串行,未来可并行化),组装 `[]Result` emit
+- 简单 ticker,防重入:`Start/Stop/SetInterval/RunNow`;单次手动 tick 超时 60s
+- tick 回调 = `refresh(ctx)`:启用厂商并行查询,由 `refreshMu` 串行提交整轮快照和排序状态
 
 ### 4.5 internal/notify
 - `Notifier.Show(ctx, title, message)`;Windows 实现通过 `w32.ShellNotifyIcon` (NIM_ADD/NIM_MODIFY) 发送气球通知,使用隐藏通知区图标(`NIS_HIDDEN`),不启动 PowerShell 子进程,不写 .ps1 脚本
@@ -144,20 +144,27 @@ OS 专属代码全部 platform-tagged,业务层通过接口解耦:
 ### 5.1 用量刷新
 ```
 scheduler tick
+  → 获取当前配置快照,读取 configVersion,分配 roundId
+  → Event("usage:loading", {configVersion, roundId, providerIds})
   → 遍历 enabled providers
   → providers.New(cfg).Query(ctx)
       → GET console 页面 → 正则解析 → Result
   → checkAlerts(res)
       → 与阈值比较 → 边缘触发 → Event("usage:alert") + notify.Show
-  → Event("usage:update", results)  ──► 前端 render()
+  → Event("usage:update", {configVersion, roundId, results}) ──► 前端更新单卡
+  → 等全部查询完成
+  → 比较本轮与上轮额度快照
+  → 额度发生变化的账号记录 lastChangedRound
+  → Event("usage:complete", {configVersion, roundId, changedProviderIds, providerIds})
+      ──► 前端统一调整卡片顺序
 ```
 
 ### 5.2 配置保存
 ```
 前端设置表单 → AppService.SaveConfig(cfg)
   → config.Save(encrypt cookie) → 更新内存 → applyWindowState → 重启调度间隔
-  → Event("config:saved") → 前端刷新 currentConfig
-  → 立即 refresh()
+  → Event("config:saved", {version, roundId, config}) → 前端刷新 currentConfig并屏蔽旧配置事件
+  → 立即进入串行 refresh()
 ```
 
 ## 6. 配置模型(JSON)
@@ -197,9 +204,11 @@ scheduler tick
 ### 7.2 事件(后端 → 前端)
 | 事件 | 载荷 | 触发 |
 |---|---|---|
-| `usage:update` | `ProviderResult[]` | 每次刷新完成 |
+| `usage:loading` | `{configVersion, roundId, providerIds}` | 一轮刷新开始,前端预留卡片 |
+| `usage:update` | `{configVersion, roundId, results}` | 单个账号查询完成,前端更新卡片 |
+| `usage:complete` | `{configVersion, roundId, changedProviderIds, providerIds}` | 整轮完成并提交额度变化排序 |
 | `usage:alert` | `{provider, window, percent, threshold}` | 越过阈值(边缘) |
-| `config:saved` | `AppConfig` | 保存配置 |
+| `config:saved` | `{version, roundId, config}` | 保存配置并屏蔽旧配置事件 |
 
 ## 8. 安全
 - cookie(会话凭据)磁盘 DPAPI 加密(`CryptProtectData`,绑定当前用户);内存明文,前端密码框回显
