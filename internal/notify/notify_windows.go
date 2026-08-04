@@ -41,12 +41,21 @@ func (n *windowsNotifier) Show(_ context.Context, title, message string) error {
 	}
 	if !n.added {
 		nid := buildNID(hwnd, n.uid, title, message)
-		nid.UFlags = w32.NIF_ICON | w32.NIF_TIP | w32.NIF_INFO
+		nid.UFlags = w32.NIF_ICON | w32.NIF_TIP | w32.NIF_INFO | w32.NIF_STATE
 		nid.HIcon = defaultIcon()
-		nid.DwState = w32.NIS_HIDDEN // hide the persistent tray icon; balloon still shows
+		nid.DwState = w32.NIS_HIDDEN
+		nid.DwStateMask = w32.NIS_HIDDEN
 		if !w32.ShellNotifyIcon(w32.NIM_ADD, nid) {
 			return errAddFailed
 		}
+		// Some Windows versions ignore NIF_STATE on NIM_ADD and only hide
+		// the icon via a follow-up NIM_MODIFY — without it a second
+		// (default-icon) tray icon would be visible.
+		hide := buildNID(hwnd, n.uid, title, message)
+		hide.UFlags = w32.NIF_STATE
+		hide.DwState = w32.NIS_HIDDEN
+		hide.DwStateMask = w32.NIS_HIDDEN
+		w32.ShellNotifyIcon(w32.NIM_MODIFY, hide)
 		n.added = true
 		return nil
 	}
