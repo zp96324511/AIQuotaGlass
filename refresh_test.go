@@ -7,41 +7,66 @@ import (
 	"aiquotaglass/internal/providers"
 )
 
-func TestQuotaSnapshots_ignore_reset_countdown_changes(t *testing.T) {
-	previous := quotaSnapshotOf(providers.Result{
-		ProviderID: "alpha",
-		Windows: []providers.WindowStatus{{
-			Key: "5h", Percent: 42, Used: 4.2, Total: 10, ResetInSec: 3600,
-		}},
-	})
-	current := providers.Result{
-		ProviderID: "alpha",
-		Windows: []providers.WindowStatus{{
-			Key: "5h", Percent: 42, Used: 4.2, Total: 10, ResetInSec: 3599,
-		}},
-	}
-
-	if !quotaSnapshotsEqual(previous, quotaSnapshotOf(current)) {
-		t.Fatal("reset countdown should not count as a quota change")
+func TestQuotaUseChanged_detects_percent_growth(t *testing.T) {
+	if !quotaUseChanged(
+		quotaSnapshotOf(providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 42, Used: 4.2, Total: 10}}}),
+		quotaSnapshotOf(providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 43, Used: 4.3, Total: 10}}}),
+	) {
+		t.Fatal("percent growth should count as real usage")
 	}
 }
 
-func TestQuotaSnapshots_detect_used_quota_changes(t *testing.T) {
-	previous := quotaSnapshotOf(providers.Result{
-		ProviderID: "alpha",
-		Windows: []providers.WindowStatus{{
-			Key: "5h", Percent: 42, Used: 4.2, Total: 10,
-		}},
-	})
-	current := quotaSnapshotOf(providers.Result{
-		ProviderID: "alpha",
-		Windows: []providers.WindowStatus{{
-			Key: "5h", Percent: 43, Used: 4.3, Total: 10,
-		}},
-	})
+func TestQuotaUseChanged_ignores_passive_changes(t *testing.T) {
+	// Percent is unchanged; every other field shifts the way rollovers and
+	// availability transitions do. None of these is user activity.
+	tests := []struct {
+		name     string
+		previous providers.Result
+		current  providers.Result
+	}{
+		{
+			name:     "window reset countdown restart",
+			previous: providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 42, Used: 4.2, Total: 10, ResetInSec: 2, Status: "ok"}}},
+			current:  providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 42, Used: 4.2, Total: 10, ResetInSec: 18000, Status: "ok"}}},
+		},
+		{
+			name:     "window rolled over to zero",
+			previous: providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 100, Used: 10, Total: 10, Status: "ok"}}},
+			current:  providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 0, Used: 0, Total: 10, Status: "ok"}}},
+		},
+		{
+			name:     "countdown ticking down",
+			previous: providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 42, Used: 4.2, Total: 10, ResetInSec: 3600}}},
+			current:  providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 42, Used: 4.2, Total: 10, ResetInSec: 3599}}},
+		},
+		{
+			name:     "status flip without numeric change",
+			previous: providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 42, Used: 4.2, Total: 10, Status: "ok"}}},
+			current:  providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 42, Used: 4.2, Total: 10, Status: "error"}}},
+		},
+		{
+			name:     "balance-type account spending (Used shrinks)",
+			previous: providers.Result{Windows: []providers.WindowStatus{{Key: "balance", Percent: 42, Used: 58, Total: 0}}},
+			current:  providers.Result{Windows: []providers.WindowStatus{{Key: "balance", Percent: 42, Used: 57, Total: 0}}},
+		},
+		{
+			name:     "percent drop from quota limit adjustment",
+			previous: providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 50, Used: 5, Total: 10}}},
+			current:  providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 45, Used: 5, Total: 11}}},
+		},
+		{
+			name:     "error enter and recover",
+			previous: providers.Result{Windows: []providers.WindowStatus{{Key: "5h", Percent: 42}}, Error: ""},
+			current:  providers.Result{Error: "request failed"},
+		},
+	}
 
-	if quotaSnapshotsEqual(previous, current) {
-		t.Fatal("used quota change should be detected")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if quotaUseChanged(quotaSnapshotOf(tt.previous), quotaSnapshotOf(tt.current)) {
+				t.Fatalf("%s must not count as usage", tt.name)
+			}
+		})
 	}
 }
 
@@ -251,4 +276,43 @@ func sameStrings(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+func TestUpsertResult_error_keeps_last_good_stats(t *testing.T) {
+	good := providers.Result{
+		ProviderID: "alpha", ProviderName: "Alpha",
+		Windows: []providers.WindowStatus{{Key: "5h", Percent: 42, Used: 4.2, Total: 10}},
+		Detail:  &providers.UsageDetail{Requests: 5, Cost: 0.5},
+	}
+	bad := providers.Result{
+		ProviderID: "alpha", ProviderName: "Alpha",
+		Error:     "request failed",
+		UpdatedAt: "12:00:00",
+	}
+
+	got := upsertResult([]providers.Result{good}, bad)
+	if len(got) != 1 || got[0].Error != "request failed" {
+		t.Fatalf("error state not applied: %+v", got)
+	}
+	if len(got[0].Windows) != 1 || got[0].Windows[0].Percent != 42 {
+		t.Fatalf("last good windows not preserved: %+v", got[0].Windows)
+	}
+	if got[0].Detail == nil || got[0].Detail.Requests != 5 {
+		t.Fatalf("last good detail not preserved: %+v", got[0].Detail)
+	}
+	if got[0].UpdatedAt != "12:00:00" {
+		t.Fatalf("error result fields not applied: %+v", got[0])
+	}
+
+	ok := providers.Result{
+		ProviderID: "alpha", ProviderName: "Alpha",
+		Windows: []providers.WindowStatus{{Key: "5h", Percent: 50, Used: 5, Total: 10}},
+	}
+	got = upsertResult(got, ok)
+	if got[0].Error != "" || len(got[0].Windows) != 1 || got[0].Windows[0].Percent != 50 {
+		t.Fatalf("success result should replace in full: %+v", got[0])
+	}
+	if got[0].Detail != nil {
+		t.Fatalf("stale detail should be dropped on success: %+v", got[0].Detail)
+	}
 }

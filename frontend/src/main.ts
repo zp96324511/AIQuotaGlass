@@ -211,28 +211,9 @@ function fmtActivity(ts: number): string {
     return sameDay ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
 }
 
-// errLine renders the error row: the provider's message, the HTTP status plus
-// a response-body snippet when ErrorInfo is present, and a "更多" button that
-// opens the request-info modal.
-function errLine(r: ProviderResult): string {
-    if (!r.error) return "";
-    const ei = r.errorInfo;
-    let line = escapeHtml(r.error);
-    if (ei && ei.statusCode) {
-        line += ` <span class="err-status">HTTP ${ei.statusCode}</span>`;
-        if (ei.body) {
-            const snip = ei.body.length > 120 ? ei.body.slice(0, 120) + "…" : ei.body;
-            line += ` <span class="err-body">${escapeHtml(snip)}</span>`;
-        }
-    }
-    const more = ei
-        ? ` <button class="err-more" data-err-more="${escapeHtml(r.providerId)}">更多</button>`
-        : "";
-    return `<div class="prov-error">${line}${more}</div>`;
-}
-
 // requestInfoModal opens (lazily creating) the modal showing the last failed
-// request of the given provider: method/url, status code and response body.
+// request of the given provider: error message, method/url, status code and
+// response body.
 function requestInfoModal(providerId: string) {
     const r = results.find(x => x.providerId === providerId);
     const ei = r?.errorInfo;
@@ -257,6 +238,7 @@ function requestInfoModal(providerId: string) {
     }
     const lines: string[] = [];
     if (r) lines.push(`厂商: ${r.providerName}`);
+    if (r?.error) lines.push(`错误: ${r.error}`);
     if (ei.method) lines.push(`方法: ${ei.method}`);
     if (ei.url) lines.push(`URL: ${ei.url}`);
     if (ei.statusCode) lines.push(`状态码: ${ei.statusCode}`);
@@ -267,15 +249,15 @@ function requestInfoModal(providerId: string) {
     backdrop.classList.remove("hidden");
 }
 
-// requestInfoClick routes clicks on the "更多" button; the handler is bound
-// once at startup (cards are rebuilt by innerHTML so inline binding is gone).
+// requestInfoClick routes clicks on the status dot (error state); the handler
+// is bound once at startup (cards are rebuilt by innerHTML so inline binding
+// is gone).
 function requestInfoClick(e: MouseEvent) {
-    const btn = (e.target as HTMLElement).closest<HTMLElement>("[data-err-more]");
-    if (btn) requestInfoModal(btn.dataset.errMore ?? "");
+    const dot = (e.target as HTMLElement).closest<HTMLElement>("[data-dot-more]");
+    if (dot) requestInfoModal(dot.dataset.dotMore ?? "");
 }
 
 function cardHTML(r: ProviderResult): string {
-    const err = errLine(r);
     const bars = (r.windows || []).map(w => {
         const th = currentConfig?.providers.find(p => p.id === r.providerId)?.alertThresholds?.[w.key] ?? 80;
         const sub = w.resetInSec >= 0 ? `<div class="row-sub">${fmtReset(w.resetInSec)}</div>` : "";
@@ -322,17 +304,17 @@ function cardHTML(r: ProviderResult): string {
         : "";
 
     const dot = r.error ? "dot-error" : "dot-ok";
+    const dotMore = r.error && r.errorInfo ? ` data-dot-more="${escapeHtml(r.providerId)}" title="点击查看请求错误信息"` : "";
     const actTs = lastActivityAt.get(r.providerId);
     const act = actTs ? `<span class="card-active" title="最近额度变化时间">活跃 ${fmtActivity(actTs)}</span>` : "";
     return `
     <div class="card" data-provider-id="${escapeHtml(r.providerId)}">
         <div class="card-head">
-            <span class="dot ${dot}"></span>
+            <span class="dot ${dot}"${dotMore}></span>
             <span class="card-name">${escapeHtml(r.providerName)}</span>
             ${act}
             <span class="card-time">${r.updatedAt}</span>
         </div>
-        ${err}
         ${bars}
         ${detail}
         ${meta}
@@ -586,10 +568,21 @@ function loadingCardHTML(id: string): string {
 }
 
 // upsertProvider replaces the panel of one provider in place (per-account
-// incremental rendering) instead of rebuilding every card.
+// incremental rendering) instead of rebuilding every card. Error results carry
+// no quota data, so the last good stats are kept and only the error state is
+// applied (status dot turns red; details open via the dot's click).
 function upsertProvider(r: ProviderResult) {
     const idx = results.findIndex(x => x.providerId === r.providerId);
-    if (idx >= 0) results[idx] = r; else results.push(r);
+    if (idx >= 0) {
+        const prev = results[idx];
+        results[idx] = {
+            ...r,
+            windows: r.windows.length ? r.windows : prev.windows,
+            detail: r.detail ?? prev.detail,
+        };
+    } else {
+        results.push(r);
+    }
 
     const existing = $<HTMLDivElement>("providerList").querySelector(`[data-provider-id="${cssEsc(r.providerId)}"]`);
     if (existing) {
@@ -1025,7 +1018,7 @@ function initWidget() {
     // Drag release -> edge snap
     document.addEventListener("mouseup", () => AppService.SnapIfNearEdge());
 
-    // "更多" on an error line -> request-info modal
+    // Error status dot -> request-info modal
     document.addEventListener("click", requestInfoClick);
 
     // Click on the docked bar -> expand back to the full widget

@@ -69,14 +69,13 @@ func TestCommitQuotaRound_ignores_missing_usage_detail_as_change(t *testing.T) {
 	}
 }
 
-func TestQuotaSnapshots_detect_each_supported_usage_detail_change(t *testing.T) {
+func TestQuotaUseChanged_detects_usage_detail_growth(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*providers.UsageDetail)
 	}{
 		{name: "requests", mutate: func(d *providers.UsageDetail) { d.Requests = 11 }},
 		{name: "cost", mutate: func(d *providers.UsageDetail) { d.Cost = 1.1 }},
-		{name: "cache hit", mutate: func(d *providers.UsageDetail) { d.CacheHit = 41 }},
 		{name: "today cost", mutate: func(d *providers.UsageDetail) { d.TodayCost = 0.2 }},
 		{name: "period cost", mutate: func(d *providers.UsageDetail) { d.PeriodCost = 2.1 }},
 	}
@@ -89,44 +88,40 @@ func TestQuotaSnapshots_detect_each_supported_usage_detail_change(t *testing.T) 
 			tt.mutate(&current)
 			current.MarkUsageMetricsAvailable()
 
-			if quotaSnapshotsEqual(
+			if !quotaUseChanged(
 				quotaSnapshotOf(providers.Result{Detail: previous}),
 				quotaSnapshotOf(providers.Result{Detail: &current}),
 			) {
-				t.Fatalf("%s detail change was not detected", tt.name)
+				t.Fatalf("%s detail growth was not detected as usage", tt.name)
 			}
 		})
 	}
 }
 
-func TestQuotaSnapshots_ignore_usage_detail_metadata_changes(t *testing.T) {
-	previous := &providers.UsageDetail{
-		Requests: 10, Cost: 1, CacheHit: 40, GroupName: "standard", ExpiresAt: "2026-08-01",
-	}
-	current := &providers.UsageDetail{
-		Requests: 10, Cost: 1, CacheHit: 40, GroupName: "premium", ExpiresAt: "2026-08-02",
-	}
+func TestQuotaUseChanged_ignores_cache_hit_alone_and_metadata(t *testing.T) {
+	previous := &providers.UsageDetail{Requests: 10, Cost: 1, CacheHit: 40, GroupName: "standard", ExpiresAt: "2026-08-01"}
+	current := &providers.UsageDetail{Requests: 10, Cost: 1, CacheHit: 42, GroupName: "premium", ExpiresAt: "2026-08-02"}
 	previous.MarkUsageMetricsAvailable()
 	current.MarkUsageMetricsAvailable()
 
-	if !quotaSnapshotsEqual(
+	if quotaUseChanged(
 		quotaSnapshotOf(providers.Result{Detail: previous}),
 		quotaSnapshotOf(providers.Result{Detail: current}),
 	) {
-		t.Fatal("usage detail metadata should not count as an activity change")
+		t.Fatal("cache-hit-only and metadata changes must not count as usage")
 	}
 }
 
-func TestQuotaSnapshots_treats_valid_zero_usage_detail_as_available(t *testing.T) {
+func TestQuotaUseChanged_treats_valid_zero_usage_detail_as_available(t *testing.T) {
 	previous := &providers.UsageDetail{}
 	current := &providers.UsageDetail{Requests: 1}
 	previous.MarkUsageMetricsAvailable()
 	current.MarkUsageMetricsAvailable()
 
-	left := quotaSnapshotOf(providers.Result{Detail: previous})
-	right := quotaSnapshotOf(providers.Result{Detail: current})
-
-	if quotaSnapshotsEqual(left, right) {
+	if !quotaUseChanged(
+		quotaSnapshotOf(providers.Result{Detail: previous}),
+		quotaSnapshotOf(providers.Result{Detail: current}),
+	) {
 		t.Fatal("valid zero usage detail should be compared with the next detail reading")
 	}
 }

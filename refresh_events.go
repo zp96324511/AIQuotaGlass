@@ -40,12 +40,27 @@ type configSavedEvent struct {
 }
 
 // upsertResult replaces one provider while preserving the current position.
+// Error results carry no quota data, so the last good windows/detail are kept
+// and only the error state is applied (the card shows a red status dot).
 func upsertResult(list []providers.Result, r providers.Result) []providers.Result {
 	for i := range list {
-		if list[i].ProviderID == r.ProviderID {
+		if list[i].ProviderID != r.ProviderID {
+			continue
+		}
+		if r.Error == "" || len(r.Windows) > 0 {
 			list[i] = r
 			return list
 		}
+		prev := list[i]
+		merged := r
+		if len(prev.Windows) > 0 {
+			merged.Windows = prev.Windows
+		}
+		if merged.Detail == nil && prev.Detail != nil {
+			merged.Detail = prev.Detail
+		}
+		list[i] = merged
+		return list
 	}
 	return append(list, r)
 }

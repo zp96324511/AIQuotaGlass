@@ -54,10 +54,9 @@ func (d UsageDetail) HasUsageMetrics() bool {
 	return d.metricsAvailable
 }
 
-// ErrorInfo carries structured details of a failed HTTP request so the card
-// can show the status code plus a response-body snippet and offer a "更多"
-// button that opens the request info modal. nil when the failure produced no
-// HTTP response (network error) or no useful payload.
+// ErrorInfo carries structured details of a failed HTTP request so the card's
+// status dot can flip to red and open the request info modal on click. nil when
+// the failure produced no HTTP response (network error) or no useful payload.
 type ErrorInfo struct {
 	Method     string `json:"method,omitempty"` // HTTP method of the failing request
 	URL        string `json:"url,omitempty"`    // request URL (credentials live in headers, never here)

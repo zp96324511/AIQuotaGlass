@@ -9,12 +9,7 @@ import (
 )
 
 type quotaWindowSnapshot struct {
-	Percent    float64
-	Used       float64
-	Total      float64
-	Unit       string
-	Status     string
-	ResetInSec int64
+	Percent float64
 }
 
 type usageDetailSnapshot struct {
@@ -34,10 +29,6 @@ type quotaSnapshot struct {
 	HasDetail bool
 	HasError  bool
 }
-
-// Small increases can come from provider rounding or request timing; a larger
-// increase means the rolling window reset and should count as recent activity.
-const resetCountdownJitterSec int64 = 5
 
 func (s *AppService) configSnapshot() *config.AppConfig {
 	cfg, _ := s.configSnapshotWithVersion()
@@ -98,14 +89,7 @@ func quotaSnapshotOf(res providers.Result) quotaSnapshot {
 	windows := make(quotaWindowsSnapshot, len(res.Windows))
 	for i := range res.Windows {
 		w := res.Windows[i]
-		windows[w.Key] = quotaWindowSnapshot{
-			Percent:    w.Percent,
-			Used:       w.Used,
-			Total:      w.Total,
-			Unit:       w.Unit,
-			Status:     w.Status,
-			ResetInSec: w.ResetInSec,
-		}
+		windows[w.Key] = quotaWindowSnapshot{Percent: w.Percent}
 	}
 	snapshot := quotaSnapshot{Windows: windows, HasError: res.Error != ""}
 	if res.Detail != nil && res.Detail.HasUsageMetrics() {
@@ -121,36 +105,31 @@ func quotaSnapshotOf(res providers.Result) quotaSnapshot {
 	return snapshot
 }
 
-func quotaSnapshotsEqual(left, right quotaSnapshot) bool {
-	if left.HasError != right.HasError {
-		return false
-	}
-	if len(left.Windows) != len(right.Windows) {
-		return false
-	}
-	for key, l := range left.Windows {
-		r, ok := right.Windows[key]
-		if !ok || l.Unit != r.Unit || l.Status != r.Status || quotaResetChanged(l.ResetInSec, r.ResetInSec) ||
-			!quotaValueEqual(l.Percent, r.Percent) || !quotaValueEqual(l.Used, r.Used) ||
-			!quotaValueEqual(l.Total, r.Total) {
-			return false
+// quotaUseChanged reports real consumption since the previous snapshot — the
+// only signal dynamic sorting listens to when promoting "the account currently
+// in use". Passive changes must not promote an account, or idle providers
+// would surface on every rollover: window resets (percent drops back to 0),
+// countdown restarts, status flips, quota limit adjustments and error
+// enter/recover transitions are availability noise, not user activity.
+// Percent is used instead of Used because balance-style accounts (DeepSeek /
+// OpenRouter) store the *remaining* amount in Used, which shrinks on spend.
+func quotaUseChanged(previous, current quotaSnapshot) bool {
+	for key, prev := range previous.Windows {
+		curr, ok := current.Windows[key]
+		if ok && curr.Percent > prev.Percent && !quotaValueEqual(curr.Percent, prev.Percent) {
+			return true
 		}
 	}
-	if !left.HasDetail || !right.HasDetail {
-		return true
+	if previous.HasDetail && current.HasDetail {
+		d, p := current.Detail, previous.Detail
+		if d.Requests > p.Requests ||
+			(d.Cost > p.Cost && !quotaValueEqual(d.Cost, p.Cost)) ||
+			(d.TodayCost > p.TodayCost && !quotaValueEqual(d.TodayCost, p.TodayCost)) ||
+			(d.PeriodCost > p.PeriodCost && !quotaValueEqual(d.PeriodCost, p.PeriodCost)) {
+			return true
+		}
 	}
-	return left.Detail.Requests == right.Detail.Requests &&
-		quotaValueEqual(left.Detail.Cost, right.Detail.Cost) &&
-		quotaValueEqual(left.Detail.CacheHit, right.Detail.CacheHit) &&
-		quotaValueEqual(left.Detail.TodayCost, right.Detail.TodayCost) &&
-		quotaValueEqual(left.Detail.PeriodCost, right.Detail.PeriodCost)
-}
-
-func quotaResetChanged(previous, current int64) bool {
-	if previous < 0 || current < 0 {
-		return previous != current
-	}
-	return current > previous+resetCountdownJitterSec
+	return false
 }
 
 func sortResultsByRecentChange(list []providers.Result, changedRounds map[string]uint64, configs []config.ProviderConfig) []providers.Result {

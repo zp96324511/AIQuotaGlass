@@ -131,7 +131,7 @@ func (s *AppService) commitQuotaRound(roundID, configVersion uint64, cfg *config
 			snapshot.Detail = previous.Detail
 			snapshot.HasDetail = true
 		}
-		if seen && !quotaSnapshotsEqual(previous, snapshot) && dynamicSortEnabled(cfg, res.ProviderID) {
+		if seen && quotaUseChanged(previous, snapshot) && dynamicSortEnabled(cfg, res.ProviderID) {
 			s.lastChangedRound[res.ProviderID] = roundID
 			s.lastChangedAt[res.ProviderID] = time.Now().Unix()
 			changed[res.ProviderID] = struct{}{}
