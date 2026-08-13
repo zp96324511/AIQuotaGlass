@@ -13,6 +13,7 @@ internal/providers/
 ├── opencode-go.go     # 示例：SSR HTML 正则解析（cookie + workspace）
 ├── zhipu.go           # 示例：API Key 查询（最简单，推荐先读）
 ├── kimi.go / minimax.go
+├── sensenova.go       # 示例：Session Cookie + OAuth 静默续期（PKCE）
 └── zhipu_test.go      # 测试约定（parse 函数单测）
 ```
 
@@ -234,6 +235,7 @@ func init() {
 |---|---|---|
 | `opencode-go` | `5h` / `weekly` / `monthly` | 3 |
 | `zhipu` / `kimi` / `minimax` | `5h` / `weekly` | 2 |
+| `sensenova` | `5h` | 1 |
 | `new-api` / `sub2api` | `total` | 1 |
 | `deepseek` / `openrouter` | `balance` | 1 |
 
@@ -246,6 +248,17 @@ func init() {
 - `Query()` 返回单个 `Key: "balance"` 的窗口，用 `balanceWindow(remaining, unit, label)` 构造（`internal/providers/quota_util.go`）——进度按 **100 单位参考线**换算：余额 ≥100 进度为 0（满血）、余额 0 进度为 100（耗尽）、中间线性。
 - `Used` 存真实余额，`Total` 恒为 0，`Unit` 存币种（`CNY`/`USD`）；前端悬停进度条显示 `余额 ¥88.5`（CNY 用 ¥，其他用 $）。
 - 阈值语义沿用统一 percent（80 默认 = 余额低于 20 元/美元时告警）。
+
+### 会话 Cookie + OAuth 静默续期（SenseNova 模式）
+
+部分控制台只用短时效的 OAuth access_token（如商汤日日新约 3 小时）且**未启用 refresh_token grant**，用户无法直接维护 access_token。这类厂商改让用户粘贴**长有效期（约 7 天）的会话 Cookie**，由 provider 自动续期：
+
+- 用户从 DevTools → Application → Cookies 复制 `oauth2_authentication_session` 的 Value 填入 `cookie` 槽位（`normalizeSenseNovaSession` 会剥掉误带的 `name=` 前缀）。
+- `Query()` 先取**包级缓存**的 access_token（`sensenovaCache`，按 provider ID 索引——`providers.New` 每轮重建实例，故缓存必须在包级，不能放 struct 字段）；token 剩余 >60s 直接复用，否则 `mintToken()` 重铸。
+- `mintToken()` 重放 PKCE 授权码流程：生成 S256 `code_verifier`/`code_challenge`（`sensenovaPKCE`）→ 预置 session cookie 的 `cookiejar` → `GET /oauth2/auth?...` 走跳转链（`CheckRedirect` 在捕获到 `?code=` 或 `?error=` 时 `http.ErrUseLastResponse` 停下，不跟进 SPA）→ `POST /oauth2/token`（authorization_code grant）拿新 access_token。
+- 从 JWT 中段解码 `exp` 与 `ext.tenant_id`（`decodeSenseNovaJWT`，account_id 自动解析，无需用户填）。
+- API 返回 401/403 → 清缓存强制重铸并重试一次；仍失败报「Session Cookie 无效或已过期」。Session cookie 自身过期（约 7 天）后用户重新登录控制台复制即可。
+- 窗口语义：商汤各 Coding Plan 模型各有独立 5 小时窗口，`parseSenseNovaQuota` 取**消耗最高**（剩余%最低）的模型作为单个 `5h` 窗口，`Label` 为该模型名，便于贴边缩条与阈值告警（键 `5h` 稳定，标签动态）。
 
 ## 5. 多账号
 

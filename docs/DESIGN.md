@@ -98,7 +98,7 @@ OS 专属代码全部 platform-tagged,业务层通过接口解耦:
 - `Result`:providerId、providerName、windows[]、可选 detail、updatedAt、error; detail 指针为 nil 表示可选明细不可用,活动指标解析成功时内部标记有效
 - `WindowStatus`:key(5h/weekly/monthly/total)、label、percent、used/total(有限额度原始数值; total=0 表示不可用)、resetInSec、status
 - `UsageDetail`:requests、cost(USD)、cacheHit(百分比)——由使用历史页聚合
-- **插件式注册表**:`Register(type, name, desc, factory, fields...)` 由各厂商文件 `init()` 自注册。`fields` 声明该类型在设置面板的**动态参数表单**(`ProviderField`: key → ProviderConfig 槽位 workspace/cookie/detail.showUsageDetail、label、kind text/password/checkbox)。`RegisterWindows(typeKey, keys...)` 在 `Register()` 之后调用,声明该厂商实际发出的用量窗口键,前端据此只渲染**适用**的阈值输入(中转面板只 total、智谱无月窗口、DeepSeek/OpenRouter 余额型只 balance)。`New(cfg)` 按 `cfg.Type` 查表路由;`Types()` 返回 `ProviderType{...WindowKeys}` 供 UI 渲染。加厂商 = 加一个 Go 文件 + `init()` 注册,主程序与前端零改动;前端表单按 schema 自动加载
+- **插件式注册表**:`Register(type, name, desc, factory, fields...)` 由各厂商文件 `init()` 自注册。`fields` 声明该类型在设置面板的**动态参数表单**(`ProviderField`: key → ProviderConfig 槽位 workspace/cookie/detail.showUsageDetail、label、kind text/password/checkbox)。`RegisterWindows(typeKey, keys...)` 在 `Register()` 之后调用,声明该厂商实际发出的用量窗口键,前端据此只渲染**适用**的阈值输入(中转面板只 total、智谱无月窗口、DeepSeek/OpenRouter 余额型只 balance、商汤 sensenova 只 5h)。`New(cfg)` 按 `cfg.Type` 查表路由;`Types()` 返回 `ProviderType{...WindowKeys}` 供 UI 渲染。加厂商 = 加一个 Go 文件 + `init()` 注册,主程序与前端零改动;前端表单按 schema 自动加载
 - **多账号**:`AppConfig.Providers` 是列表,同 `type` 允许多实例(每个实例独立 id/workspace/cookie/阈值)。设置面板支持添加/删除账号,`id` 必须唯一(告警去重键 = `providerID/windowKey`)。每次 `refresh` 为每个启用实例 `New()` 一个 provider 串行查询
 - **限制**:Go `plugin` 包不支持 Windows,无运行时动态加载;第三方插件需外部进程模型(未实现)
 
@@ -244,8 +244,9 @@ go vet ./... && go test ./...
 ## 12. 路线图
 1. ~~官方 API 余额查询（DeepSeek/OpenRouter，`balance` 窗口按 100 元/美元参考线换算，悬停看真实余额）~~(已实现)
 2. ~~设置面板动态厂商表单~~(已实现:卡片内类型下拉 + 按 `Fields` schema 动态渲染)
-3. 托盘图标 + 开机自启 + 单实例
-4. 用量历史落盘 + 简单趋势
-5. NSIS 安装包 / 发布签名
-6. macOS 窗口实现
-7. 外部进程插件模型(第三方厂商独立交付,基于注册表 Factory 包装)
+3. ~~商汤日日新 Coding Plan 用量（sensenova，Session Cookie + OAuth PKCE 静默续期，access_token 包级缓存自动刷新）~~(已实现)
+4. 托盘图标 + 开机自启 + 单实例
+5. 用量历史落盘 + 简单趋势
+6. NSIS 安装包 / 发布签名
+7. macOS 窗口实现
+8. 外部进程插件模型(第三方厂商独立交付,基于注册表 Factory 包装)
