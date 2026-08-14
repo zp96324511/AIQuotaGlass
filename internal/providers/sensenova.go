@@ -583,10 +583,12 @@ func decodeSenseNovaJWT(token string) (tenantID string, expAt time.Time, err err
 }
 
 // parseSenseNovaQuota extracts the coding-plan remaining percent per model and
-// reports the most-consumed model (lowest remaining) as a single 5h window.
-// The API returns REMAINING percent, so used percent = 100 - remaining. Ties
-// on remaining resolve to the lexicographically smallest model name so the
-// output is deterministic across the randomized map iteration order.
+// returns ONE window per model (Key = Label = model name). The API returns
+// REMAINING percent, so used percent = 100 - remaining. Windows are ordered by
+// used percent descending (most-consumed model first) so the edge-dock snap bar
+// — which maps the first window to the 5h slot — shows the model closest to
+// depletion. Ties on used resolve to the lexicographically smallest model name
+// for deterministic output across the randomized map iteration order.
 func parseSenseNovaQuota(body []byte) ([]WindowStatus, error) {
 	var payload struct {
 		ModelRemainingPercent map[string]any `json:"model_remaining_percent"`
@@ -613,24 +615,28 @@ func parseSenseNovaQuota(body []byte) ([]WindowStatus, error) {
 		return nil, fmt.Errorf("no usable remaining percent")
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].remaining != entries[j].remaining {
-			return entries[i].remaining < entries[j].remaining
+		ui, uj := 100-entries[i].remaining, 100-entries[j].remaining
+		if ui != uj {
+			return ui > uj
 		}
 		return entries[i].model < entries[j].model
 	})
-	worst := entries[0]
-	used := 100 - worst.remaining
-	if used < 0 {
-		used = 0
+	windows := make([]WindowStatus, 0, len(entries))
+	for _, e := range entries {
+		used := 100 - e.remaining
+		if used < 0 {
+			used = 0
+		}
+		if used > 100 {
+			used = 100
+		}
+		windows = append(windows, WindowStatus{
+			Key:        e.model,
+			Label:      e.model,
+			Percent:    used,
+			Status:     "ok",
+			ResetInSec: -1,
+		})
 	}
-	if used > 100 {
-		used = 100
-	}
-	return []WindowStatus{{
-		Key:        "5h",
-		Label:      worst.model,
-		Percent:    used,
-		Status:     "ok",
-		ResetInSec: -1,
-	}}, nil
+	return windows, nil
 }

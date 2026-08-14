@@ -21,27 +21,33 @@ func TestParseSenseNovaQuota(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseSenseNovaQuota: %v", err)
 	}
-	if len(windows) != 1 {
-		t.Fatalf("want 1 window, got %d", len(windows))
+	if len(windows) != 4 {
+		t.Fatalf("want 4 windows (one per model), got %d", len(windows))
 	}
-	w := windows[0]
-	if w.Key != "5h" {
-		t.Fatalf("key = %q, want 5h", w.Key)
+	// Ordered by used percent desc → glm-5.2 (3.33%) first, then the 0% models
+	// tie-broken by lexicographic name (deepseek-v4-flash, sen...6.8, sen...u1).
+	if windows[0].Key != "glm-5.2" || windows[0].Label != "glm-5.2" {
+		t.Fatalf("first window = %+v, want glm-5.2 (most consumed)", windows[0])
 	}
-	if w.Label != "glm-5.2" {
-		t.Fatalf("label = %q, want glm-5.2 (lowest remaining)", w.Label)
+	if !approx(windows[0].Percent, 3.33, 1e-2) {
+		t.Fatalf("glm-5.2 percent = %v, want ~3.33", windows[0].Percent)
 	}
-	if !approx(w.Percent, 3.33, 1e-2) {
-		t.Fatalf("percent = %v, want ~3.33 (100-96.67)", w.Percent)
+	if windows[0].ResetInSec != -1 {
+		t.Fatalf("resetInSec = %d, want -1 (no reset time)", windows[0].ResetInSec)
 	}
-	if w.ResetInSec != -1 {
-		t.Fatalf("resetInSec = %d, want -1 (no reset time)", w.ResetInSec)
+	if windows[1].Key != "deepseek-v4-flash" {
+		t.Fatalf("second window = %+v, want deepseek-v4-flash (0%%, smallest name)", windows[1])
+	}
+	for _, w := range windows[1:] {
+		if w.Percent != 0 {
+			t.Fatalf("%s percent = %v, want 0", w.Label, w.Percent)
+		}
 	}
 }
 
 func TestParseSenseNovaQuotaAllFull(t *testing.T) {
-	// Every model at 100% remaining → 0% used; the label is the
-	// lexicographically smallest model (deterministic across map order).
+	// Every model at 100% remaining → all 0% used; ordered by used desc (all
+	// 0) then lexicographic model name, so deepseek-v4-flash is first.
 	body := []byte(`{
 		"model_remaining_percent": {
 			"sensenova-u1-fast": 100,
@@ -54,23 +60,34 @@ func TestParseSenseNovaQuotaAllFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseSenseNovaQuota: %v", err)
 	}
-	if len(windows) != 1 || windows[0].Percent != 0 {
-		t.Fatalf("want single 0%% window, got %+v", windows)
+	if len(windows) != 4 {
+		t.Fatalf("want 4 windows, got %d", len(windows))
 	}
-	if windows[0].Label != "deepseek-v4-flash" {
-		t.Fatalf("label = %q, want deepseek-v4-flash (smallest name on tie)", windows[0].Label)
+	for _, w := range windows {
+		if w.Percent != 0 {
+			t.Fatalf("%s percent = %v, want 0", w.Label, w.Percent)
+		}
+	}
+	if windows[0].Key != "deepseek-v4-flash" {
+		t.Fatalf("first = %q, want deepseek-v4-flash (smallest name on tie)", windows[0].Key)
 	}
 }
 
 func TestParseSenseNovaQuotaStringValues(t *testing.T) {
-	// Remaining percents may arrive as numeric strings.
+	// Remaining percents may arrive as numeric strings; ordered by used desc.
 	body := []byte(`{"model_remaining_percent": {"glm-5.2": "80", "deepseek-v4-flash": "100"}}`)
 	windows, err := parseSenseNovaQuota(body)
 	if err != nil {
 		t.Fatalf("parseSenseNovaQuota: %v", err)
 	}
-	if windows[0].Label != "glm-5.2" || !approx(windows[0].Percent, 20, 1e-9) {
-		t.Fatalf("wrong window: %+v", windows[0])
+	if len(windows) != 2 {
+		t.Fatalf("want 2 windows, got %d", len(windows))
+	}
+	if windows[0].Key != "glm-5.2" || !approx(windows[0].Percent, 20, 1e-9) {
+		t.Fatalf("first window = %+v, want glm-5.2 @ 20%%", windows[0])
+	}
+	if windows[1].Key != "deepseek-v4-flash" || windows[1].Percent != 0 {
+		t.Fatalf("second window = %+v, want deepseek-v4-flash @ 0%%", windows[1])
 	}
 }
 
