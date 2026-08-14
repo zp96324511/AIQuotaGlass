@@ -2,6 +2,7 @@ package providers
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -116,24 +117,6 @@ func TestDecodeSenseNovaJWTErrors(t *testing.T) {
 	}
 }
 
-func TestNormalizeSenseNovaSession(t *testing.T) {
-	const want = "MTc4NjYzMzg4M3xEabc=="
-	cases := []string{
-		want,
-		"  " + want + "  ",
-		"oauth2_authentication_session=" + want,
-		" oauth2_authentication_session=" + want + " ",
-	}
-	for _, c := range cases {
-		if got := normalizeSenseNovaSession(c); got != want {
-			t.Fatalf("normalize(%q) = %q, want %q", c, got, want)
-		}
-	}
-	if got := normalizeSenseNovaSession(""); got != "" {
-		t.Fatalf("normalize empty = %q", got)
-	}
-}
-
 func TestSenseNovaPKCE(t *testing.T) {
 	v, c, err := sensenovaPKCE()
 	if err != nil {
@@ -155,5 +138,101 @@ func TestSenseNovaPKCE(t *testing.T) {
 	v2, _, _ := sensenovaPKCE()
 	if v == v2 {
 		t.Fatal("verifier not random")
+	}
+}
+
+// TestSenseNovaJWEStructure verifies the JWE token shape the SenseNova login
+// API expects: four base64url parts, protected header {"alg":"RSA-OAEP",
+// "enc":"A256GCM"}, no padding anywhere. It uses the real IdP public key shape
+// (a fresh 2048-bit RSA key) so RSA-OAEP + AES-GCM run for real.
+func TestSenseNovaJWEStructure(t *testing.T) {
+	// Generate an RSA key pair, export the public part as JWK (n, e).
+	priv, err := rsaGenerateKey()
+	if err != nil {
+		t.Fatalf("rsa key: %v", err)
+	}
+	nB64 := base64.RawURLEncoding.EncodeToString(priv.N.Bytes())
+	eB64 := base64.RawURLEncoding.EncodeToString(bigIntBytes(priv.E))
+
+	token, err := sensenovaJWEEncrypt(nB64, eB64, []byte("hunter2"))
+	if err != nil {
+		t.Fatalf("sensenovaJWEEncrypt: %v", err)
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 5 {
+		t.Fatalf("want 5 JWE parts (protected.encrypted_key.iv.ciphertext.tag), got %d", len(parts))
+	}
+	for i, p := range parts {
+		if strings.ContainsAny(p, "+/=") {
+			t.Fatalf("part %d not base64url-no-pad: %q", i, p)
+		}
+	}
+	hdr, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("decode protected header: %v", err)
+	}
+	var h struct {
+		Alg string `json:"alg"`
+		Enc string `json:"enc"`
+	}
+	if err := json.Unmarshal(hdr, &h); err != nil {
+		t.Fatalf("parse protected header: %v", err)
+	}
+	if h.Alg != "RSA-OAEP" || h.Enc != "A256GCM" {
+		t.Fatalf("header = %+v, want RSA-OAEP/A256GCM", h)
+	}
+	// IV part is 12 bytes once decoded.
+	iv, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatalf("decode iv: %v", err)
+	}
+	if len(iv) != 12 {
+		t.Fatalf("iv length = %d, want 12", len(iv))
+	}
+	// Ciphertext (part 4) equals plaintext length (no tag inlined); the 16-byte
+	// GCM tag is a separate 5th part.
+	ct, err := base64.RawURLEncoding.DecodeString(parts[3])
+	if err != nil {
+		t.Fatalf("decode ciphertext: %v", err)
+	}
+	if len(ct) != len("hunter2") {
+		t.Fatalf("ciphertext length = %d, want %d (plaintext length)", len(ct), len("hunter2"))
+	}
+	tag, err := base64.RawURLEncoding.DecodeString(parts[4])
+	if err != nil {
+		t.Fatalf("decode tag: %v", err)
+	}
+	if len(tag) != 16 {
+		t.Fatalf("tag length = %d, want 16", len(tag))
+	}
+	// Two encryptions of the same plaintext must differ (random CEK + IV).
+	tok2, _ := sensenovaJWEEncrypt(nB64, eB64, []byte("hunter2"))
+	if token == tok2 {
+		t.Fatal("JWE not randomized")
+	}
+}
+
+// TestSenseNovaJWERoundTrip decrypts a token we produced, proving the CEK
+// wrapping (RSA-OAEP/SHA-1) and A256GCM AEAD (AAD = base64url protected header)
+// match the JWE spec the server expects.
+func TestSenseNovaJWERoundTrip(t *testing.T) {
+	priv, err := rsaGenerateKey()
+	if err != nil {
+		t.Fatalf("rsa key: %v", err)
+	}
+	nB64 := base64.RawURLEncoding.EncodeToString(priv.N.Bytes())
+	eB64 := base64.RawURLEncoding.EncodeToString(bigIntBytes(priv.E))
+
+	secret := "ObioxWyflB7U$kO"
+	token, err := sensenovaJWEEncrypt(nB64, eB64, []byte(secret))
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	pt, err := sensenovaJWEDecrypt(priv, token)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if string(pt) != secret {
+		t.Fatalf("round-trip = %q, want %q", pt, secret)
 	}
 }

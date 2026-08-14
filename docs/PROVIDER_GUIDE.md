@@ -13,7 +13,7 @@ internal/providers/
 ├── opencode-go.go     # 示例：SSR HTML 正则解析（cookie + workspace）
 ├── zhipu.go           # 示例：API Key 查询（最简单，推荐先读）
 ├── kimi.go / minimax.go
-├── sensenova.go       # 示例：Session Cookie + OAuth 静默续期（PKCE）
+├── sensenova.go       # 示例：账号密码 OAuth 登录（PKCE + JWE，自动续期）
 └── zhipu_test.go      # 测试约定（parse 函数单测）
 ```
 
@@ -249,15 +249,15 @@ func init() {
 - `Used` 存真实余额，`Total` 恒为 0，`Unit` 存币种（`CNY`/`USD`）；前端悬停进度条显示 `余额 ¥88.5`（CNY 用 ¥，其他用 $）。
 - 阈值语义沿用统一 percent（80 默认 = 余额低于 20 元/美元时告警）。
 
-### 会话 Cookie + OAuth 静默续期（SenseNova 模式）
+### 账号密码 OAuth 自动登录（SenseNova 模式）
 
-部分控制台只用短时效的 OAuth access_token（如商汤日日新约 3 小时）且**未启用 refresh_token grant**，用户无法直接维护 access_token。这类厂商改让用户粘贴**长有效期（约 7 天）的会话 Cookie**，由 provider 自动续期：
+部分控制台只用短时效的 OAuth access_token（如商汤日日新约 3 小时）且**未启用 refresh_token grant**，用户无法直接维护 access_token。这类厂商改让用户填**账号密码**，由 provider 全自动完成登录续期：
 
-- 用户从 DevTools → Application → Cookies 复制 `oauth2_authentication_session` 的 Value 填入 `cookie` 槽位（`normalizeSenseNovaSession` 会剥掉误带的 `name=` 前缀）。
+- 字段：用户名复用 `workspace` 槽位、密码复用 `cookie` 槽位（本地 DPAPI 加密存储，与其它厂商 cookie 一致）。
 - `Query()` 先取**包级缓存**的 access_token（`sensenovaCache`，按 provider ID 索引——`providers.New` 每轮重建实例，故缓存必须在包级，不能放 struct 字段）；token 剩余 >60s 直接复用，否则 `mintToken()` 重铸。
-- `mintToken()` 重放 PKCE 授权码流程：生成 S256 `code_verifier`/`code_challenge`（`sensenovaPKCE`）→ 预置 session cookie 的 `cookiejar` → `GET /oauth2/auth?...` 走跳转链（`CheckRedirect` 在捕获到 `?code=` 或 `?error=` 时 `http.ErrUseLastResponse` 停下，不跟进 SPA）→ `POST /oauth2/token`（authorization_code grant）拿新 access_token。
-- 从 JWT 中段解码 `exp` 与 `ext.tenant_id`（`decodeSenseNovaJWT`，account_id 自动解析，无需用户填）。
-- API 返回 401/403 → 清缓存强制重铸并重试一次；仍失败报「Session Cookie 无效或已过期」。Session cookie 自身过期（约 7 天）后用户重新登录控制台复制即可。
+- `mintToken()` 重放完整 OAuth2 授权码流程：① 起一个无 session 的 PKCE authorize（S256 challenge，`sensenovaPKCE`）→ 从首个 302 捕获 `login_challenge`；② 取 IdP JWKS（`signin.sensecore.cn/.well-known/jwks.json`），挑 `kid:public:hydra.openid.id-token` 的 RSA 公钥；③ 用该公钥 **JWE 加密**密码（RSA-OAEP+A256GCM，Go 标准库实现，注意商汤用的是**非标准 5 段紧凑序列化** `protected.encrypted_key.iv.ciphertext.tag`——tag 单独成第 5 段，非 JWE 标准的内联）；④ POST `{username, password:<JWE>, challenge, is_encrypt:true}` 到 `iam/authn/v1/auth/nova/login` → 拿 `redirect` URL（含 login_verifier）；⑤ 带 cookie jar GET 该 URL 走 consent→code，`CheckRedirect` 在捕获到 `?code=` 或 `?error=` 时 `http.ErrUseLastResponse` 停下；⑥ `POST /oauth2/token`（authorization_code grant）换 access_token。
+- 从 access_token 的 JWT 中段解码 `exp` 与 `ext.tenant_id`（account_id 自动解析，无需用户填）。
+- API 返回 401/403 → 清缓存强制重铸并重试一次；仍失败报「登录后仍被拒绝, 请检查账号密码」。密码不改则长期免维护。
 - 窗口语义：商汤各 Coding Plan 模型各有独立 5 小时窗口，`parseSenseNovaQuota` 取**消耗最高**（剩余%最低）的模型作为单个 `5h` 窗口，`Label` 为该模型名，便于贴边缩条与阈值告警（键 `5h` 稳定，标签动态）。
 
 ## 5. 多账号

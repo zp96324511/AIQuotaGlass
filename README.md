@@ -48,7 +48,7 @@
 | Sub2API | API Key（自建中转面板配额 / 订阅限额 / 今日·近30天费用） |
 | DeepSeek | API Key（官方账户余额，按 100 元参考线换算进度，悬停看真实余额） |
 | OpenRouter | API Key（官方账户余额，按 100 美元参考线换算进度，悬停看真实余额） |
-| SenseNova 日日新 | Session Cookie（Coding Plan 各模型 5 小时窗口，取消耗最高者；access_token 经 OAuth 静默续期，session cookie 有效期约 7 天） |
+| SenseNova 日日新 | 账号密码（Coding Plan 各模型 5 小时窗口，取消耗最高者；OAuth 密码登录自动续期 access_token，密码不改则长期免维护） |
 
 扩展新厂商只需在 `internal/providers/` 加一个 Go 文件——见[厂商插件开发指南](docs/PROVIDER_GUIDE.md)。
 

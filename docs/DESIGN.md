@@ -244,7 +244,7 @@ go vet ./... && go test ./...
 ## 12. 路线图
 1. ~~官方 API 余额查询（DeepSeek/OpenRouter，`balance` 窗口按 100 元/美元参考线换算，悬停看真实余额）~~(已实现)
 2. ~~设置面板动态厂商表单~~(已实现:卡片内类型下拉 + 按 `Fields` schema 动态渲染)
-3. ~~商汤日日新 Coding Plan 用量（sensenova，Session Cookie + OAuth PKCE 静默续期，access_token 包级缓存自动刷新）~~(已实现)
+3. ~~商汤日日新 Coding Plan 用量（sensenova，账号密码 OAuth 登录自动续期，PKCE + JWE 加密密码，access_token 包级缓存自动刷新）~~(已实现)
 4. 托盘图标 + 开机自启 + 单实例
 5. 用量历史落盘 + 简单趋势
 6. NSIS 安装包 / 发布签名
