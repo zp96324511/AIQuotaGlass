@@ -19,6 +19,7 @@ interface WindowStatus {
 }
 interface UsageDetail {
     requests: number;
+    weeklyRequests?: number;
     cost: number;
     cacheHit: number;
     todayCost?: number;
@@ -152,6 +153,14 @@ function fmtQuota(v: number): string {
     return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 4 }).format(v);
 }
 
+// fmtTokens compactifies token counts: 9.6M / 835K / 980. Large counts keep
+// one decimal; exact small values stay plain.
+function fmtTokens(v: number): string {
+    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+    if (v >= 1_000) return `${Math.round(v / 1_000)}K`;
+    return String(Math.round(v));
+}
+
 // fmtBalance renders a remaining balance with its currency (¥ for CNY, $
 // otherwise, e.g. USD).
 function fmtBalance(v: number, unit?: string): string {
@@ -160,8 +169,8 @@ function fmtBalance(v: number, unit?: string): string {
 
 function quotaTitle(w: WindowStatus): string {
     if (w.key === "balance") return `${w.label}: ${fmtBalance(w.used, w.unit)}`;
-    if (w.total <= 0) return "";
-    return `${w.label}: 已用 ${fmtQuota(w.used)} / 总量 ${fmtQuota(w.total)}`;
+    if (w.total <= 0) return w.used > 0 ? `${w.label}: 已用 ${fmtTokens(w.used)} (无上限)` : "";
+    return `${w.label}: 已用 ${fmtTokens(w.used)} / 参考上限 ${fmtTokens(w.total)}`;
 }
 
 function barClass(p: number, threshold: number): string {
@@ -273,7 +282,7 @@ function cardHTML(r: ProviderResult): string {
     }).join("");
 
     const d = r.detail;
-    const detail = d && (d.requests > 0 || (d.todayCost ?? 0) > 0 || (d.periodCost ?? 0) > 0)
+    const detail = d && (d.requests > 0 || (d.weeklyRequests ?? 0) > 0 || (d.todayCost ?? 0) > 0 || (d.periodCost ?? 0) > 0)
         ? (() => {
             const parts: string[] = [];
             if (d.todayCost) parts.push(`今日 $${d.todayCost.toFixed(1)}`);
@@ -281,7 +290,9 @@ function cardHTML(r: ProviderResult): string {
             // Relay panels report spend figures instead of a request count;
             // classic providers keep the generic cost/requests line.
             if (!(d.todayCost || d.periodCost)) {
-                if (d.requests) parts.push(`${d.requests} 次请求`);
+                if (d.requests) parts.push(d.weeklyRequests
+                    ? `今日请求 ${d.requests} 次 · 本周请求 ${d.weeklyRequests} 次`
+                    : `${d.requests} 次请求`);
                 if (d.cost) parts.push(`费用 $${d.cost.toFixed(4)}`);
             }
             if (d.cacheHit) parts.push(`缓存命中 ${d.cacheHit.toFixed(1)}%`);
@@ -712,8 +723,13 @@ const WINDOW_LABELS: Record<string, string> = {
     "total": "总额度",
     "balance": "余额",
 };
-function thresholdLabel(k: string): string {
-    return WINDOW_LABELS[k] ?? k;
+// Per-type overrides: providers that reuse a window key with a different
+// meaning (electronhub maps "5h" to a daily counter, not a rolling 5h).
+const TYPE_WINDOW_LABELS: Record<string, Record<string, string>> = {
+    "electronhub": { "5h": "当日" },
+};
+function thresholdLabel(k: string, type = ""): string {
+    return TYPE_WINDOW_LABELS[type]?.[k] ?? WINDOW_LABELS[k] ?? k;
 }
 
 // Get/set a provider config slot addressed by a ProviderField.Key.
@@ -778,7 +794,7 @@ function renderSettings() {
                 <label>名称 <input type="text" id="name_${i}" value="${escapeHtml(p.name)}"/></label>
                 ${fieldInputs}
                 <div class="thresholds">
-                    ${windowKeysFor(t).map(k => `<label>${thresholdLabel(k)}阈值 <input type="number" id="th_${k}_${i}" min="0" max="100" value="${p.alertThresholds[k] ?? 80}"/></label>`).join("")}
+                    ${windowKeysFor(t).map(k => `<label>${thresholdLabel(k, t)}阈值 <input type="number" id="th_${k}_${i}" min="0" max="100" value="${p.alertThresholds[k] ?? 80}"/></label>`).join("")}
                 </div>
                 <div class="prov-actions">
                     <button type="button" class="del-btn" data-del="${i}">删除此账号</button>

@@ -26,6 +26,9 @@ type UsageDetail struct {
 	Requests int     `json:"requests"`
 	Cost     float64 `json:"cost"`     // USD
 	CacheHit float64 `json:"cacheHit"` // percent of input tokens served from cache
+	// WeeklyRequests complements Requests for providers that report both a
+	// daily and a rolling-weekly request count (ElectronHub).
+	WeeklyRequests int `json:"weeklyRequests,omitempty"`
 	// TodayCost/PeriodCost are spend figures for relay panels that report
 	// them (Sub2API: today's cost and the rolling ~30d cost). When set, the
 	// widget renders them instead of the generic Cost line.

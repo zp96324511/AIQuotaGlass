@@ -68,6 +68,7 @@ func TestTypesExposeWindowKeys(t *testing.T) {
 		"new-api":     {"total"},
 		"sub2api":     {"total"},
 		"sensenova":   {"5h"},
+		"electronhub": {"5h", "weekly"},
 	}
 	got := map[string][]string{}
 	for _, pt := range Types() {

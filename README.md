@@ -49,6 +49,7 @@
 | DeepSeek | API Key（官方账户余额，按 100 元参考线换算进度，悬停看真实余额） |
 | OpenRouter | API Key（官方账户余额，按 100 美元参考线换算进度，悬停看真实余额） |
 | SenseNova 日日新 | 账号密码（Coding Plan 各模型 5 小时窗口，取消耗最高者；OAuth 密码登录自动续期 access_token，密码不改则长期免维护） |
+| ElectronHub DevPass | 主 API Key（Coding Plan 近 7 天统计：今日/本周 tokens 与请求次数，无限 token 显示为「无限」） |
 
 扩展新厂商只需在 `internal/providers/` 加一个 Go 文件——见[厂商插件开发指南](docs/PROVIDER_GUIDE.md)。
 

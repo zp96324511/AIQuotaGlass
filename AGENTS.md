@@ -34,7 +34,7 @@ main.go                     入口;窗口配置(Frameless+AlwaysOnTop+透明+禁
 app.go                      AppService —— 前端绑定的唯一服务(setup 内部连接);
                             OpenSettings/CloseSettings 管理设置弹窗窗口
 internal/config/            配置:JSON 持久化,DPAPI 加密 cookie,AQUOTA_CONFIG_DIR
-internal/providers/         Provider 接口 + opencode-go(SSR HTML 正则解析) + zhipu/kimi/minimax(API Key 查询) + sensenova(账号密码 OAuth 自动登录)
+internal/providers/         Provider 接口 + opencode-go(SSR HTML 正则解析) + zhipu/kimi/minimax(API Key 查询) + sensenova(账号密码 OAuth 自动登录) + electronhub(主 Key 查 /user/me 近 7 天统计,无限窗口 Percent -1)
 internal/scheduler/         定时刷新(防重入,可停/重启/立即执行)
 internal/notify/            Windows 通知(Shell_NotifyIconW 气球,无 PowerShell 子进程)
 internal/edge/              贴边吸附(按窗口所在显示器 workarea + SetWindowPos, 10px 阈值)

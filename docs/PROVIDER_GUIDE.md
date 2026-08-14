@@ -236,6 +236,7 @@ func init() {
 | `opencode-go` | `5h` / `weekly` / `monthly` | 3 |
 | `zhipu` / `kimi` / `minimax` | `5h` / `weekly` | 2 |
 | `sensenova` | `5h` | 1 |
+| `electronhub` | `5h`(今日) / `weekly` | 2 |
 | `new-api` / `sub2api` | `total` | 1 |
 | `deepseek` / `openrouter` | `balance` | 1 |
 
@@ -259,6 +260,14 @@ func init() {
 - 从 access_token 的 JWT 中段解码 `exp` 与 `ext.tenant_id`（account_id 自动解析，无需用户填）。
 - API 返回 401/403 → 清缓存强制重铸并重试一次；仍失败报「登录后仍被拒绝, 请检查账号密码」。密码不改则长期免维护。
 - 窗口语义：商汤各 Coding Plan 模型各有独立 5 小时窗口，`parseSenseNovaQuota` 取**消耗最高**（剩余%最低）的模型作为单个 `5h` 窗口，`Label` 为该模型名，便于贴边缩条与阈值告警（键 `5h` 稳定，标签动态）。
+
+### 主 Key 查询近 7 天统计（ElectronHub 模式）
+
+ElectronHub 的 DevPass 面板数据只走「cookie 换 JWT + 鉴权 WebSocket」，但 refresh_token 单次有效且与浏览器会话互踢，不适合长期挂机。折衷：用**永久主 key**（`ek-`，Dev key `ek-dev-` 无法查询）调 `GET /v1/user/me`，其 `history[]` 返回近 7 天按日聚合的 `requests/input_tokens/output_tokens`：
+
+- 窗口：`history[0]`（最新一天，免时区假设）→ `5h` 键（Label「今日」）；全 7 条求和 → `weekly` 键。DevPass 无限 token，两窗口 `Percent: -1`（前端显示「无限」）、`Total: 0`、`ResetInSec: -1`，`Used` 携带真实 tokens 供 hover。
+- 明细：`Detail.Requests` = 今日请求，`Detail.WeeklyRequests` = 本周请求（`UsageDetail` 专属可选字段，前端渲染「今日 N 次 · 本周 N 次」）；今日 requests 增长即计为活动（跨日重置 requests 回落不计，符合被动变化约定）。
+- 该站 Cloudflare 拦默认 Go UA：请求须带桌面 Chrome UA。
 
 ## 5. 多账号
 
