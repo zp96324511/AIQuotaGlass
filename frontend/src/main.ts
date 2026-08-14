@@ -610,19 +610,11 @@ function snappedDir(): string {
 
 // snapSlotWindows maps provider windows to the three reusable DOM slots. Relay
 // panels and balance accounts (DeepSeek/OpenRouter) use one primary quota slot;
-// SenseNova reports one window per Coding Plan model (key = model name) and
-// the snap bar shows the most-consumed one; other providers match by key.
+// other providers use their returned windows.
 function snapSlotWindows(res: ProviderResult | undefined): Map<SnapKey, WindowStatus> {
     const slots = new Map<SnapKey, WindowStatus>();
     const windows = res?.windows ?? [];
     const providerType = currentConfig?.providers.find(p => p.id === res?.providerId)?.type;
-    if (providerType === "sensenova") {
-        // Each model is its own window (key = model name); the snap bar maps the
-        // most-consumed window (highest percent) to the 5h slot.
-        const top = windows.slice().sort((a, b) => b.percent - a.percent)[0];
-        if (top) slots.set("5h", top);
-        return slots;
-    }
     if (providerType === "sub2api" || providerType === "new-api" || windows.some(w => w.key === "total" || w.key === "balance")) {
         const primary = windows.find(w => w.key === "total" || w.key === "balance") ?? windows[0];
         if (primary) slots.set("5h", primary);
