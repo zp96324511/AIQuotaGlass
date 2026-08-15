@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -105,7 +106,7 @@ func (p *electronhub) Query(ctx context.Context) (*Result, error) {
 		return res, err
 	}
 
-	windows, detail, perr := parseElectronhubUserMe(body)
+	windows, detail, perr := parseElectronhubUserMe(body, time.Now())
 	if perr != nil {
 		res.Error = fmt.Sprintf("解析用量数据失败: %v", perr)
 		return res, perr
@@ -148,11 +149,14 @@ type electronhubHistoryEntry struct {
 }
 
 // parseElectronhubUserMe maps /v1/user/me to quota windows and the usage
-// detail. history[] comes newest-day-first; entry[0] is "today" under the
-// server's day boundary, and the whole array (≈7 days) is the weekly
-// aggregate. Tokens are in+out sums; the 20M/100M totals are Lite-tier
+// detail. history[] order is not guaranteed, so entries are sorted by date
+// first. "Today" is the entry matching the local date; when the server has
+// not bucketed the local day yet (its day boundary is UTC, up to 8h behind
+// UTC+8), the newest available entry is shown instead so the numbers never
+// read zero while usage is ongoing. Weekly sums entries within 7 days of the
+// newest bucket. Tokens are in+out sums; the 20M/100M totals are Lite-tier
 // reference soft headroom (display-only — DevPass never hard-stops).
-func parseElectronhubUserMe(body []byte) ([]WindowStatus, *UsageDetail, error) {
+func parseElectronhubUserMe(body []byte, now time.Time) ([]WindowStatus, *UsageDetail, error) {
 	var payload struct {
 		Subscription string                    `json:"subscription"`
 		History      []electronhubHistoryEntry `json:"history"`
@@ -164,13 +168,37 @@ func parseElectronhubUserMe(body []byte) ([]WindowStatus, *UsageDetail, error) {
 		return nil, nil, fmt.Errorf("history 为空 (账号无使用记录)")
 	}
 
-	today := payload.History[0]
+	entries := append([]electronhubHistoryEntry(nil), payload.History...)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Date > entries[j].Date })
+
+	today := entries[0]
+	if localDate := now.Format("2006-01-02"); localDate != today.Date {
+		for _, h := range entries {
+			if h.Date == localDate {
+				today = h
+				break
+			}
+		}
+		// No bucket for the local day yet: keep the newest entry as "today"
+		// so early-morning usage shows the freshest available numbers.
+	}
+
+	newest, _ := time.ParseInLocation("2006-01-02", entries[0].Date, time.Local)
+	weekStart := newest.AddDate(0, 0, -6)
 	var weekTokens float64
 	var weekRequests int
-	for _, h := range payload.History {
+	for _, h := range entries {
+		d, err := time.ParseInLocation("2006-01-02", h.Date, time.Local)
+		if err != nil {
+			continue
+		}
+		if d.Before(weekStart) {
+			continue
+		}
 		weekTokens += h.InputTokens + h.OutputTokens
 		weekRequests += h.Requests
 	}
+
 	todayTokens := today.InputTokens + today.OutputTokens
 	used := func(v float64, limit float64) float64 {
 		if v > limit {

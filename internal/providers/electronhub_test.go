@@ -22,7 +22,8 @@ const electronhubSampleHistory = `{
 }`
 
 func TestParseElectronhubUserMe(t *testing.T) {
-	windows, detail, err := parseElectronhubUserMe([]byte(electronhubSampleHistory))
+	now := time.Date(2026, 8, 14, 17, 45, 0, 0, time.Local)
+	windows, detail, err := parseElectronhubUserMe([]byte(electronhubSampleHistory), now)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -68,8 +69,9 @@ func TestParseElectronhubUserMe(t *testing.T) {
 
 func TestParseElectronhubUserMeSingleDay(t *testing.T) {
 	// Fresh account: only one day of history — weekly == today.
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.Local)
 	body := `{"history":[{"date":"2026-08-14","requests":3,"input_tokens":100,"output_tokens":5}]}`
-	windows, detail, err := parseElectronhubUserMe([]byte(body))
+	windows, detail, err := parseElectronhubUserMe([]byte(body), now)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -81,10 +83,67 @@ func TestParseElectronhubUserMeSingleDay(t *testing.T) {
 	}
 }
 
+func TestParseElectronhubUserMeUnsortedHistory(t *testing.T) {
+	// Server may return history in insertion order (oldest first) — the
+	// parser must pick the local-today entry by date, not by index.
+	now := time.Date(2026, 8, 15, 9, 57, 0, 0, time.Local)
+	body := `{"history":[
+		{"date":"2026-08-14","requests":433,"input_tokens":49725537,"output_tokens":210278},
+		{"date":"2026-08-15","requests":124,"input_tokens":17117521,"output_tokens":29940}
+	]}`
+	windows, detail, err := parseElectronhubUserMe([]byte(body), now)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if want := 17117521.0 + 29940; windows[0].Used != want {
+		t.Fatalf("today used = %v, want %v (must be the 08-15 entry)", windows[0].Used, want)
+	}
+	if detail.Requests != 124 {
+		t.Fatalf("today requests = %d, want 124", detail.Requests)
+	}
+}
+
+func TestParseElectronhubUserMeTodayNotBucketedYet(t *testing.T) {
+	// Early morning UTC+8: the server has not bucketed the local day (UTC
+	// boundary lag). The newest entry is shown instead of zeros.
+	now := time.Date(2026, 8, 15, 6, 30, 0, 0, time.Local)
+	body := `{"history":[{"date":"2026-08-14","requests":433,"input_tokens":1000,"output_tokens":10}]}`
+	windows, detail, err := parseElectronhubUserMe([]byte(body), now)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if windows[0].Used != 1010 {
+		t.Fatalf("fallback today used = %v, want 1010 (newest bucket)", windows[0].Used)
+	}
+	if detail.Requests != 433 {
+		t.Fatalf("fallback requests = %d, want 433", detail.Requests)
+	}
+}
+
+func TestParseElectronhubUserMeWeeklyWindow(t *testing.T) {
+	// Weekly sums only buckets within 7 days of the newest entry; older
+	// entries (subscription >7 days) are excluded.
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.Local)
+	body := `{"history":[
+		{"date":"2026-08-20","requests":1,"input_tokens":100,"output_tokens":0},
+		{"date":"2026-08-19","requests":2,"input_tokens":200,"output_tokens":0},
+		{"date":"2026-08-14","requests":3,"input_tokens":300,"output_tokens":0},
+		{"date":"2026-08-13","requests":4,"input_tokens":400,"output_tokens":0}
+	]}`
+	_, detail, err := parseElectronhubUserMe([]byte(body), now)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if detail.WeeklyRequests != 6 {
+		t.Fatalf("weekly requests = %d, want 6 (08-14..08-20 inclusive, 08-13 excluded)", detail.WeeklyRequests)
+	}
+}
+
 func TestParseElectronhubUserMeOverLimit(t *testing.T) {
 	// DevPass never hard-stops: usage past the reference cap stays at 100%.
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.Local)
 	body := `{"history":[{"date":"2026-08-14","requests":5,"input_tokens":25000000,"output_tokens":1}]}`
-	windows, _, err := parseElectronhubUserMe([]byte(body))
+	windows, _, err := parseElectronhubUserMe([]byte(body), now)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -94,13 +153,14 @@ func TestParseElectronhubUserMeOverLimit(t *testing.T) {
 }
 
 func TestParseElectronhubUserMeErrors(t *testing.T) {
-	if _, _, err := parseElectronhubUserMe([]byte(`{"history":[]}`)); err == nil {
+	now := time.Now()
+	if _, _, err := parseElectronhubUserMe([]byte(`{"history":[]}`), now); err == nil {
 		t.Fatal("empty history should error")
 	}
-	if _, _, err := parseElectronhubUserMe([]byte(`{"history":null}`)); err == nil {
+	if _, _, err := parseElectronhubUserMe([]byte(`{"history":null}`), now); err == nil {
 		t.Fatal("null history should error")
 	}
-	if _, _, err := parseElectronhubUserMe([]byte(`not json`)); err == nil {
+	if _, _, err := parseElectronhubUserMe([]byte(`not json`), now); err == nil {
 		t.Fatal("invalid JSON should error")
 	}
 }
