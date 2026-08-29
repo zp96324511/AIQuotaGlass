@@ -21,9 +21,9 @@ const opencodeGoBase = "https://opencode.ai"
 // the usage page embeds a usage.list array of per-request records.
 var (
 	reWindows = regexp.MustCompile(
-		`rollingUsage:\$R\[\d+\]=\{status:"([^"]+)",resetInSec:(\d+),usagePercent:(\d+)\},` +
-			`weeklyUsage:\$R\[\d+\]=\{status:"([^"]+)",resetInSec:(\d+),usagePercent:(\d+)\},` +
-			`monthlyUsage:\$R\[\d+\]=\{status:"([^"]+)",resetInSec:(\d+),usagePercent:(\d+)\}`)
+		`rollingUsage:\$R\[\d+\]=\{status:"([^"]+)",resetInSec:(\d+),usagePercent:(\d+(?:\.\d+)?)[^}]*\},` +
+			`weeklyUsage:\$R\[\d+\]=\{status:"([^"]+)",resetInSec:(\d+),usagePercent:(\d+(?:\.\d+)?)[^}]*\},` +
+			`monthlyUsage:\$R\[\d+\]=\{status:"([^"]+)",resetInSec:(\d+),usagePercent:(\d+(?:\.\d+)?)[^}]*\}`)
 	reRecord = regexp.MustCompile(
 		`timeCreated:\$R\[\d+\]=new Date\("([^"]+)"\),timeUpdated:\$R\[\d+\]=new Date\("[^"]+"\),timeDeleted:[^,]+,` +
 			`model:"([^"]+)",provider:"[^"]*",inputTokens:(\d+),outputTokens:(\d+),reasoningTokens:(\d+),` +

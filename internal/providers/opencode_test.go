@@ -51,3 +51,42 @@ func TestParseOpenCodeGoDetail_requires_records(t *testing.T) {
 		t.Fatal("page without usage records must return an error, not a valid zero detail")
 	}
 }
+
+func TestWindowsRegex_matches_float_percent_with_extra_fields(t *testing.T) {
+	// OpenCode Go console now serializes usagePercent as a float (e.g. 2.1)
+	// and appends usage/limit fields after it. Both changes previously broke
+	// reWindows (int-only percent + strict closing brace).
+	body := []byte(`$R[33]=` + "`" + `{mine:!0,useBalance:!1,allowTraining:!1,region:$R[34]=["us","eu","sg","cn"],` +
+		`rollingUsage:$R[35]={status:"ok",resetInSec:9695,usagePercent:2.1,usage:24603408,limit:1200000000},` +
+		`weeklyUsage:$R[36]={status:"ok",resetInSec:333444,usagePercent:7.1,usage:212383754,limit:3000000000},` +
+		`monthlyUsage:$R[37]={status:"ok",resetInSec:1565451,usagePercent:43.8,usage:262800000,limit:600000000}}` + "`")
+
+	m := reWindows.FindSubmatch(body)
+	if m == nil {
+		t.Fatal("reWindows must match the new float-percent payload")
+	}
+	if got, want := string(m[2]), "9695"; got != want {
+		t.Fatalf("rolling resetInSec = %q, want %q", got, want)
+	}
+	if got, want := string(m[3]), "2.1"; got != want {
+		t.Fatalf("rolling usagePercent = %q, want %q", got, want)
+	}
+	if got, want := string(m[6]), "7.1"; got != want {
+		t.Fatalf("weekly usagePercent = %q, want %q", got, want)
+	}
+	if got, want := string(m[9]), "43.8"; got != want {
+		t.Fatalf("monthly usagePercent = %q, want %q", got, want)
+	}
+	if f := parseFloat(m[3]); f != 2.1 {
+		t.Fatalf("parseFloat(2.1) = %v, want 2.1", f)
+	}
+}
+
+func TestWindowsRegex_matches_integer_percent_payload(t *testing.T) {
+	body := []byte(`$R[16]($R[30],$R[41]={rollingUsage:$R[42]={status:"ok",resetInSec:5944,usagePercent:17},` +
+		`weeklyUsage:$R[43]={status:"ok",resetInSec:278201,usagePercent:75},` +
+		`monthlyUsage:$R[44]={status:"ok",resetInSec:880201,usagePercent:91}});`)
+	if reWindows.FindSubmatch(body) == nil {
+		t.Fatal("reWindows must keep matching the legacy integer-percent payload")
+	}
+}
