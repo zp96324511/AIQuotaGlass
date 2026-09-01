@@ -22,9 +22,9 @@ import (
 // per-day requests and input/output tokens (DevPass requests report 0
 // credits, so the free/0.25-credit fields are irrelevant for subscribers).
 //
-// Windows carry the reference soft-headroom totals (20M daily / 100M weekly,
-// Lite tier) as display-only scale: DevPass is unlimited tokens, so the bars
-// show "how far into the slow lane", never a hard quota. history[] comes
+// Windows carry the reference soft-headroom totals (120M daily / 600M weekly)
+// as display-only scale: DevPass is unlimited tokens, so the bars show "how
+// far into the slow lane", never a hard quota. history[] comes
 // newest-day-first; entry[0] is "today" under the server's day boundary.
 //
 // Cloudflare blocks the default Go/curl User-Agent on electronhub.ai; a
@@ -33,11 +33,11 @@ const (
 	electronhubUserMeURL = "https://api.electronhub.ai/v1/user/me"
 	// electronhubUA must look like a desktop browser to pass Cloudflare.
 	electronhubUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
-	// Reference soft headroom caps (Lite tier) used as display-only totals so
-	// the bars carry a scale. DevPass is unlimited — going past these never
-	// blocks, it only slows admission, so the percent is informational.
-	electronhubDailySoftLimit = 20_000_000
-	electronhubWeeklyCap     = 100_000_000
+	// Reference soft headroom caps used as display-only totals so the bars
+	// carry a scale. DevPass is unlimited — going past these never blocks, it
+	// only slows admission, so the percent is informational.
+	electronhubDailySoftLimit = 120_000_000
+	electronhubWeeklyCap     = 600_000_000
 )
 
 type electronhub struct {
@@ -59,8 +59,8 @@ func init() {
 				"   不是 ek-dev- 开头的 Dev key —— Dev key 无法查询用量)\n" +
 				"3. 粘贴到上方「API Key」\n" +
 				"4. 用量 = 今日/本周 tokens (输入+输出) 与请求次数统计;\n" +
-				"   进度条按参考软上限 (今日 20M / 本周 100M) 换算,\n" +
-				"   DevPass 无限 token, 超限仅降速不停用",
+					"   进度条按参考软上限 (今日 120M / 本周 600M) 换算,\n" +
+					"   DevPass 无限 token, 超限仅降速不停用",
 		},
 		ProviderField{Key: "cookie", Label: "API Key (ek- 主密钥)", Kind: "password",
 			Required: true, Placeholder: "ek- 开头的 Master Key"},
@@ -154,7 +154,7 @@ type electronhubHistoryEntry struct {
 // not bucketed the local day yet (its day boundary is UTC, up to 8h behind
 // UTC+8), the newest available entry is shown instead so the numbers never
 // read zero while usage is ongoing. Weekly sums entries within 7 days of the
-// newest bucket. Tokens are in+out sums; the 20M/100M totals are Lite-tier
+// newest bucket. Tokens are in+out sums; the 120M/600M totals are
 // reference soft headroom (display-only — DevPass never hard-stops).
 func parseElectronhubUserMe(body []byte, now time.Time) ([]WindowStatus, *UsageDetail, error) {
 	var payload struct {

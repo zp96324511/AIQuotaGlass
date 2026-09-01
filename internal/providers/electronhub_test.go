@@ -37,10 +37,10 @@ func TestParseElectronhubUserMe(t *testing.T) {
 	if want := 9555770.0 + 50869; daily.Used != want {
 		t.Fatalf("daily used = %v, want %v", daily.Used, want)
 	}
-	if daily.Total != 20_000_000 {
-		t.Fatalf("daily total = %v, want 20M", daily.Total)
+	if daily.Total != 120_000_000 {
+		t.Fatalf("daily total = %v, want 120M", daily.Total)
 	}
-	if want := (9555770.0 + 50869) / 20_000_000 * 100; daily.Percent != want {
+	if want := (9555770.0 + 50869) / 120_000_000 * 100; daily.Percent != want {
 		t.Fatalf("daily percent = %v, want %v", daily.Percent, want)
 	}
 	if daily.ResetInSec != -1 {
@@ -53,8 +53,8 @@ func TestParseElectronhubUserMe(t *testing.T) {
 	if want := 9555770.0 + 50869 + 400000 + 2000; weekly.Used != want {
 		t.Fatalf("weekly used = %v, want %v", weekly.Used, want)
 	}
-	if weekly.Total != 100_000_000 {
-		t.Fatalf("weekly total = %v, want 100M", weekly.Total)
+	if weekly.Total != 600_000_000 {
+		t.Fatalf("weekly total = %v, want 600M", weekly.Total)
 	}
 	if detail == nil || !detail.HasUsageMetrics() {
 		t.Fatalf("detail missing/not marked: %+v", detail)
@@ -142,7 +142,7 @@ func TestParseElectronhubUserMeWeeklyWindow(t *testing.T) {
 func TestParseElectronhubUserMeOverLimit(t *testing.T) {
 	// DevPass never hard-stops: usage past the reference cap stays at 100%.
 	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.Local)
-	body := `{"history":[{"date":"2026-08-14","requests":5,"input_tokens":25000000,"output_tokens":1}]}`
+	body := `{"history":[{"date":"2026-08-14","requests":5,"input_tokens":125000000,"output_tokens":1}]}`
 	windows, _, err := parseElectronhubUserMe([]byte(body), now)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
