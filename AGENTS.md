@@ -34,7 +34,7 @@ main.go                     入口;窗口配置(Frameless+AlwaysOnTop+透明+禁
 app.go                      AppService —— 前端绑定的唯一服务(setup 内部连接);
                             OpenSettings/CloseSettings 管理设置弹窗窗口
 internal/config/            配置:JSON 持久化,DPAPI 加密 cookie,AQUOTA_CONFIG_DIR
-internal/providers/         Provider 接口 + opencode-go(SSR HTML 正则解析) + zhipu/kimi/minimax(API Key 查询) + sensenova(账号密码 OAuth 自动登录) + electronhub(主 Key 查 /user/me 近 7 天统计,无限窗口 Percent -1)
+internal/providers/         Provider 接口 + opencode-go(SSR HTML 正则解析) + zhipu/kimi/minimax(API Key 查询) + sensenova(账号密码 OAuth 自动登录) + electronhub(主 Key 查 /user/me 近 7 天统计,无限窗口 Percent -1) + ctyun(天翼云账号密码自动登录,网关签名 Web-Signature)
 internal/scheduler/         定时刷新(防重入,可停/重启/立即执行)
 internal/notify/            Windows 通知(Shell_NotifyIconW 气球,无 PowerShell 子进程)
 internal/edge/              贴边吸附(按窗口所在显示器 workarea + SetWindowPos, 10px 阈值)
@@ -69,6 +69,7 @@ frontend/                   玻璃拟态 UI;src/main.ts 双窗口模式,public/s
 7. WebView2 远程调试(仅调试):`Windows.AdditionalBrowserArgs: ["--remote-debugging-port=9223"]`,然后 CDP `Runtime.evaluate` 读 DOM。发布版必须移除。
 8. `wails3 build` 默认 `CGO_ENABLED=0`,纯 Go,无需 gcc。`-tags production`。
 9. 绑定接口参数警告:任何导出方法带接口/函数类型都会生成 `any` 并运行时报错——规避。
+10. **天翼云(ctyun)网关签名**:eaichat 的所有 API 需要 `Web-Signature: SHA256("[按 key 排序的 k=v 参数]&sk&时间戳ms&随机8字符]")` + Cookie(YL-Token)。sk 由登录链产生:SHA256(密码)→IAM `/iam/login`(deviceCode=`iam:`+随机串,localStorage 持久)→CAS 302 拿 ST ticket→`eaiSysInfo`(AES-128-ECB,固定 key `chinatelecom@cnn` 解出 RSA 公钥 ssopk/ssopkid)→`ticketAuthorize`(clientKey=RSA-PKCS1v15(随机16字符) 的 hex;返回的 sessionKey 是**用 clientKey 原文再 AES-ECB 加密的**,必须解密才是真 sk)。会话(YL-Token cookie)7 天有效,按 provider 缓存,401 强制重登。e2e 测试:`go test ./internal/providers/ -tags ctyune2e -run TestCtyunE2E -v`(需 env CTYUN_ACCOUNT/CTYUN_PASSWORD)。
 
 ## 目录规模
 - 后端 ~700 行,前端 ~450 行。保持精简;新增功能优先复用 `internal/providers`/`internal/config` 抽象。
