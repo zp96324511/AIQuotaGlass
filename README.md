@@ -50,7 +50,7 @@
 | OpenRouter | API Key（官方账户余额，按 100 美元参考线换算进度，悬停看真实余额） |
 | SenseNova 日日新 | 账号密码（Coding Plan 各模型 5 小时窗口，取消耗最高者；OAuth 密码登录自动续期 access_token，密码不改则长期免维护） |
 | ElectronHub DevPass | 主 API Key（Coding Plan 近 7 天统计：今日/本周 tokens 与请求次数，无限 token 显示为「无限」） |
-| 天翼云 Coding Plan | 账号密码（云智助手近5小时/本周/套餐总量三窗口限额占比与重置倒计时；自动登录并维护 7 天会话，密码不改则长期免维护） |
+| 天翼云 Coding Plan | 账号密码（云智助手近5小时/本周/套餐总量三窗口，按套餐档位参考上限 Lite 1200/9000/18000 次、Pro 6000/45000/90000 次，显示已用/参考上限与重置倒计时；自动登录并维护 7 天会话，密码不改则长期免维护） |
 
 扩展新厂商只需在 `internal/providers/` 加一个 Go 文件——见[厂商插件开发指南](docs/PROVIDER_GUIDE.md)。
 

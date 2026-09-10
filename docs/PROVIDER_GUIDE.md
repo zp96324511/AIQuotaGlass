@@ -278,7 +278,7 @@ ElectronHub 的 DevPass 面板数据只走「cookie 换 JWT + 鉴权 WebSocket�
 - 字段：用户名（手机号）复用 `workspace` 槽位、密码复用 `cookie` 槽位（DPAPI 加密）。
 - 登录链（`mintSession`，五步，全部标准库）：① `SHA256(密码)` POST 到 IAM 门户 `/iam/login`（`deviceCode` = `"iam:"+随机串`、`deviceName: "iam:web"`，无验证码）→ 拿 `token_iam` cookie；② GET `cas/login?service=…` 手动停在 302，从 `Location` 提取一次性 ST ticket；③ GET `eaiSysInfo` → 密文用**固定 key `chinatelecom@cnn`** AES-128-ECB 解密出网关配置（RSA 公钥 `ssopk` + `ssopkid`）；④ `clientKey` = RSA-PKCS1v15(随机 16 字符, ssopk) 的 hex，随 ticket POST `ticketAuthorize` → 拿 `YL-Token` cookie（7 天）与 `sessionKey`——**sessionKey 是用 clientKey 原文再 AES-ECB 加密过的，必须解密才是真 sk**（最易踩的坑）；⑤ 后续请求带 `Web-Signature: SHA256("[按 key 排序的 k=v 参数]&sk&毫秒时间戳&随机8字符]")` + Cookie 头。
 - 会话缓存：`ctyunCache`（包级，按 provider ID）存 sk + 预拼 Cookie 头 + cookie 过期时间，到期前 30 分钟或 401/403 时清缓存重登；重登失败回退用旧会话试一次。
-- 窗口：`usage/detail?id=<planId>` 返回 近5小时/本周/套餐总量 三窗口，`usage` 是 0..1 占比（×100 为 percent，`Used` 存原值 `Total: 1`），`tips` 中文倒计时（`"3天14时22分后刷新限额"`）用正则解析成 `ResetInSec`；planId/name/到期日从 `usage/summry` 取，进 `Detail.GroupName`/`ExpiresAt`。
+- 窗口：`usage/detail?id=<planId>` 返回 近5小时/本周/套餐总量 三窗口，`usage` 是 0..1 占比（×100 为 percent）；API 只给占比不给绝对值，按套餐档位映射**参考请求数上限**（`ctyunLimitsForPlan`：Lite 1200/9000/18000，Pro 6000/45000/90000，未知名回退 Lite）换算 `Used = 占比×上限`、`Total = 上限`（前端显示「已用/参考上限」）；`tips` 中文倒计时（`"3天14时22分后刷新限额"`）用正则解析成 `ResetInSec`；planId/name/到期日从 `usage/summry` 取，进 `Detail.GroupName`/`ExpiresAt`。
 - e2e 测试用 build tag 隔离（`ctyun_e2e_test.go`，凭据走 `CTYUN_ACCOUNT`/`CTYUN_PASSWORD` 环境变量），默认 `go test` 不触网。
 
 ## 5. 多账号

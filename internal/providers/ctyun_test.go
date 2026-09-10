@@ -24,7 +24,7 @@ const ctyunSampleDetail = `{
 }`
 
 func TestParseCtyunUsage(t *testing.T) {
-	windows, detail, err := parseCtyunUsage([]byte(ctyunSampleDetail), time.Now())
+	windows, detail, err := parseCtyunUsage([]byte(ctyunSampleDetail), "Coding Plan Lite", time.Now())
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -42,19 +42,31 @@ func TestParseCtyunUsage(t *testing.T) {
 	if five.Percent < 0.899 || five.Percent > 0.901 {
 		t.Fatalf("5h percent = %v, want ~0.9", five.Percent)
 	}
-	if five.Used != 0.009 || five.Total != 1 {
-		t.Fatalf("5h used/total = %v/%v", five.Used, five.Total)
+	// Lite 5h cap 1200: used = 0.009 * 1200 = 10.8 requests
+	if five.Used < 10.79 || five.Used > 10.81 {
+		t.Fatalf("5h used = %v, want ~10.8", five.Used)
+	}
+	if five.Total != 1200 {
+		t.Fatalf("5h total = %v, want 1200", five.Total)
 	}
 	if five.ResetInSec != 14*60 {
 		t.Fatalf("5h resetInSec = %d, want 840", five.ResetInSec)
 	}
 	weekly := byKey["weekly"]
+	// Lite weekly cap 9000: used = 0.001 * 9000 = 9 requests
+	if weekly.Total != 9000 || weekly.Used != 9 {
+		t.Fatalf("weekly used/total = %v/%v, want 9/9000", weekly.Used, weekly.Total)
+	}
 	if weekly.ResetInSec != 3*86400+14*3600+19*60 {
 		t.Fatalf("weekly resetInSec = %d, want %d", weekly.ResetInSec, 3*86400+14*3600+19*60)
 	}
 	monthly := byKey["monthly"]
 	if monthly.Label != "套餐总量" || monthly.Percent < 0.099 || monthly.Percent > 0.101 {
 		t.Fatalf("monthly window: %+v", monthly)
+	}
+	// Lite monthly cap 18000: used = 0.001 * 18000 = 18 requests
+	if monthly.Total != 18000 || monthly.Used != 18 {
+		t.Fatalf("monthly used/total = %v/%v, want 18/18000", monthly.Used, monthly.Total)
 	}
 	if monthly.ResetInSec != 29*86400+14*3600+14*60 {
 		t.Fatalf("monthly resetInSec = %d", monthly.ResetInSec)
@@ -64,23 +76,46 @@ func TestParseCtyunUsage(t *testing.T) {
 	}
 }
 
+func TestParseCtyunUsageProPlan(t *testing.T) {
+	windows, _, err := parseCtyunUsage([]byte(ctyunSampleDetail), "Coding Plan Pro", time.Now())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	byKey := map[string]WindowStatus{}
+	for _, w := range windows {
+		byKey[w.Key] = w
+	}
+	if got := byKey["5h"].Total; got != 6000 {
+		t.Fatalf("pro 5h total = %v, want 6000", got)
+	}
+	if got := byKey["5h"].Used; got < 53.99 || got > 54.01 {
+		t.Fatalf("pro 5h used = %v, want ~54", got)
+	}
+	if got := byKey["weekly"].Total; got != 45000 {
+		t.Fatalf("pro weekly total = %v, want 45000", got)
+	}
+	if got := byKey["monthly"].Total; got != 90000 {
+		t.Fatalf("pro monthly total = %v, want 90000", got)
+	}
+}
+
 func TestParseCtyunUsageErrors(t *testing.T) {
-	if _, _, err := parseCtyunUsage([]byte("not json"), time.Now()); err == nil {
+	if _, _, err := parseCtyunUsage([]byte("not json"), "Coding Plan Lite", time.Now()); err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
 	badCode, _ := json.Marshal(map[string]any{"resultCode": 500, "resultMsg": "boom"})
-	if _, _, err := parseCtyunUsage(badCode, time.Now()); err == nil {
+	if _, _, err := parseCtyunUsage(badCode, "Coding Plan Lite", time.Now()); err == nil {
 		t.Fatal("expected error for non-zero resultCode")
 	}
 	noWindows, _ := json.Marshal(map[string]any{"resultCode": 0, "data": map[string]any{"usages": []any{}}})
-	if _, _, err := parseCtyunUsage(noWindows, time.Now()); err == nil {
+	if _, _, err := parseCtyunUsage(noWindows, "Coding Plan Lite", time.Now()); err == nil {
 		t.Fatal("expected error for empty usages")
 	}
 	unknownPeriod, _ := json.Marshal(map[string]any{
 		"resultCode": 0,
 		"data": map[string]any{"usages": []map[string]any{{"period": "上月", "tips": "", "usage": 0.5}}},
 	})
-	if _, _, err := parseCtyunUsage(unknownPeriod, time.Now()); err == nil {
+	if _, _, err := parseCtyunUsage(unknownPeriod, "Coding Plan Lite", time.Now()); err == nil {
 		t.Fatal("expected error for unknown period name")
 	}
 }

@@ -109,6 +109,21 @@ type ctyunSession struct {
 	planExpiry string
 }
 
+// ctyunPlanLimits maps a plan tier to its reference request limits per window
+// (5h / weekly / monthly). The API reports usage as a 0..1 ratio only, so the
+// bars show "已用/参考上限" against these published caps. Unknown tiers fall
+// back to the Lite caps (the only tier with a known mapping).
+type ctyunPlanLimits struct {
+	fiveHourly, weekly, monthly float64
+}
+
+func ctyunLimitsForPlan(name string) ctyunPlanLimits {
+	if strings.Contains(name, "Pro") {
+		return ctyunPlanLimits{fiveHourly: 6000, weekly: 45000, monthly: 90000}
+	}
+	return ctyunPlanLimits{fiveHourly: 1200, weekly: 9000, monthly: 18000}
+}
+
 var (
 	ctyunMu    sync.Mutex
 	ctyunCache = map[string]*ctyunSession{} // key = provider ID
@@ -158,7 +173,7 @@ func (p *ctyun) Query(ctx context.Context) (*Result, error) {
 		return res, err
 	}
 
-	windows, detail, perr := parseCtyunUsage(body, time.Now())
+	windows, detail, perr := parseCtyunUsage(body, sess.planName, time.Now())
 	if perr != nil {
 		res.Error = fmt.Sprintf("解析用量数据失败: %v", perr)
 		return res, perr
@@ -558,8 +573,10 @@ func ctyunCountdownSec(tips string) int64 {
 
 // parseCtyunUsage maps the usage/detail payload to quota windows. usage is a
 // 0..1 ratio of the window limit; the period names 近5小时/本周/套餐总量 map to
-// the 5h/weekly/monthly window keys. The countdown in tips becomes ResetInSec.
-func parseCtyunUsage(body []byte, now time.Time) ([]WindowStatus, *UsageDetail, error) {
+// the 5h/weekly/monthly window keys. The plan tier's reference request caps
+// (ctyunLimitsForPlan) scale the ratio into 已用/参考上限 request counts. The
+// countdown in tips becomes ResetInSec.
+func parseCtyunUsage(body []byte, planName string, now time.Time) ([]WindowStatus, *UsageDetail, error) {
 	var payload struct {
 		ResultCode int    `json:"resultCode"`
 		ResultMsg  string `json:"resultMsg"`
@@ -587,6 +604,8 @@ func parseCtyunUsage(body []byte, now time.Time) ([]WindowStatus, *UsageDetail, 
 
 	keyByPeriod := map[string]string{"近5小时": "5h", "本周": "weekly", "套餐总量": "monthly"}
 	labelByPeriod := map[string]string{"近5小时": "近5小时", "本周": "本周", "套餐总量": "套餐总量"}
+	limits := ctyunLimitsForPlan(planName)
+	totalByKey := map[string]float64{"5h": limits.fiveHourly, "weekly": limits.weekly, "monthly": limits.monthly}
 	var windows []WindowStatus
 	for _, u := range payload.Data.Usages {
 		key, ok := keyByPeriod[u.Period]
@@ -600,12 +619,13 @@ func parseCtyunUsage(body []byte, now time.Time) ([]WindowStatus, *UsageDetail, 
 		if percent > 100 {
 			percent = 100
 		}
+		total := totalByKey[key]
 		windows = append(windows, WindowStatus{
 			Key:        key,
 			Label:      labelByPeriod[u.Period],
 			Percent:    percent,
-			Used:       u.Usage,
-			Total:      1,
+			Used:       u.Usage * total,
+			Total:      total,
 			ResetInSec: ctyunCountdownSec(u.Tips),
 			Status:     "ok",
 		})
