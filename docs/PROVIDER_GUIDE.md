@@ -14,6 +14,7 @@ internal/providers/
 ├── zhipu.go           # 示例：API Key 查询（最简单，推荐先读）
 ├── kimi.go / minimax.go
 ├── sensenova.go       # 示例：账号密码 OAuth 登录（PKCE + JWE，自动续期）
+├── ctyun.go           # 示例：网关签名 + 多跳 CAS 自动登录（AES-ECB/RSA，会话缓存）
 └── zhipu_test.go      # 测试约定（parse 函数单测）
 ```
 
@@ -237,6 +238,7 @@ func init() {
 | `zhipu` / `kimi` / `minimax` | `5h` / `weekly` | 2 |
 | `sensenova` | `5h` | 1 |
 | `electronhub` | `5h`(今日) / `weekly` | 2 |
+| `ctyun` | `5h`(近5小时) / `weekly`(本周) / `monthly`(套餐总量) | 3 |
 | `new-api` / `sub2api` | `total` | 1 |
 | `deepseek` / `openrouter` | `balance` | 1 |
 
@@ -268,6 +270,16 @@ ElectronHub 的 DevPass 面板数据只走「cookie 换 JWT + 鉴权 WebSocket�
 - 窗口：`history[0]`（最新一天，免时区假设）→ `5h` 键（Label「今日」）；全 7 条求和 → `weekly` 键。DevPass 无限 token，两窗口 `Percent: -1`（前端显示「无限」）、`Total: 0`、`ResetInSec: -1`，`Used` 携带真实 tokens 供 hover。
 - 明细：`Detail.Requests` = 今日请求，`Detail.WeeklyRequests` = 本周请求（`UsageDetail` 专属可选字段，前端渲染「今日 N 次 · 本周 N 次」）；今日 requests 增长即计为活动（跨日重置 requests 回落不计，符合被动变化约定）。
 - 该站 Cloudflare 拦默认 Go UA：请求须带桌面 Chrome UA。
+
+### 网关签名 + 多跳自动登录（天翼云 ctyun 模式）
+
+天翼云智助手（eaichat.ctyun.cn）的 API 网关要求每个请求带 `Web-Signature` 头，签名密钥 sk 由一条多跳登录链产生。参考 `ctyun.go`：
+
+- 字段：用户名（手机号）复用 `workspace` 槽位、密码复用 `cookie` 槽位（DPAPI 加密）。
+- 登录链（`mintSession`，五步，全部标准库）：① `SHA256(密码)` POST 到 IAM 门户 `/iam/login`（`deviceCode` = `"iam:"+随机串`、`deviceName: "iam:web"`，无验证码）→ 拿 `token_iam` cookie；② GET `cas/login?service=…` 手动停在 302，从 `Location` 提取一次性 ST ticket；③ GET `eaiSysInfo` → 密文用**固定 key `chinatelecom@cnn`** AES-128-ECB 解密出网关配置（RSA 公钥 `ssopk` + `ssopkid`）；④ `clientKey` = RSA-PKCS1v15(随机 16 字符, ssopk) 的 hex，随 ticket POST `ticketAuthorize` → 拿 `YL-Token` cookie（7 天）与 `sessionKey`——**sessionKey 是用 clientKey 原文再 AES-ECB 加密过的，必须解密才是真 sk**（最易踩的坑）；⑤ 后续请求带 `Web-Signature: SHA256("[按 key 排序的 k=v 参数]&sk&毫秒时间戳&随机8字符]")` + Cookie 头。
+- 会话缓存：`ctyunCache`（包级，按 provider ID）存 sk + 预拼 Cookie 头 + cookie 过期时间，到期前 30 分钟或 401/403 时清缓存重登；重登失败回退用旧会话试一次。
+- 窗口：`usage/detail?id=<planId>` 返回 近5小时/本周/套餐总量 三窗口，`usage` 是 0..1 占比（×100 为 percent，`Used` 存原值 `Total: 1`），`tips` 中文倒计时（`"3天14时22分后刷新限额"`）用正则解析成 `ResetInSec`；planId/name/到期日从 `usage/summry` 取，进 `Detail.GroupName`/`ExpiresAt`。
+- e2e 测试用 build tag 隔离（`ctyun_e2e_test.go`，凭据走 `CTYUN_ACCOUNT`/`CTYUN_PASSWORD` 环境变量），默认 `go test` 不触网。
 
 ## 5. 多账号
 
